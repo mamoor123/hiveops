@@ -11,9 +11,9 @@ try {
   const count = row && (row.c !== undefined ? row.c : (row.count !== undefined ? row.count : 0));
   if (count === 0) {
     const defaults = [
-      { name: 'Auto-assign urgent tasks', description: 'Notify manager on urgent task creation', trigger: 'task_created', conditions: JSON.stringify([{ field: 'priority', operator: 'equals', value: 'urgent' }]), actions: JSON.stringify([{ type: 'notify', target: 'department_manager', message: 'Urgent task created' }]), enabled: true, runs: 3, last_run: new Date(Date.now() - 3600000).toISOString() },
-      { name: 'Escalate overdue tasks', description: 'Escalate tasks past due date', trigger: 'schedule_daily', conditions: JSON.stringify([{ field: 'due_date', operator: 'past_due' }]), actions: JSON.stringify([{ type: 'notify', target: 'admin', message: 'Task overdue' }, { type: 'update_task', field: 'status', value: 'blocked' }]), enabled: true, runs: 12, last_run: new Date(Date.now() - 86400000).toISOString() },
-      { name: 'Welcome new team members', description: 'Welcome message on registration', trigger: 'user_registered', conditions: JSON.stringify([]), actions: JSON.stringify([{ type: 'send_message', channel: 'general', message: 'Welcome {{user.name}} to the team! 🎉' }]), enabled: true, runs: 1, last_run: new Date(Date.now() - 36000000).toISOString() },
+      { name: 'Auto-assign urgent tasks', description: 'Notify manager on urgent task creation', trigger: 'task_created', conditions: JSON.stringify([{ field: 'priority', operator: 'equals', value: 'urgent' }]), actions: JSON.stringify([{ type: 'notify', target: 'department_manager', message: 'Urgent task created' }]), enabled: 1, runs: 3, last_run: new Date(Date.now() - 3600000).toISOString() },
+      { name: 'Escalate overdue tasks', description: 'Escalate tasks past due date', trigger: 'schedule_daily', conditions: JSON.stringify([{ field: 'due_date', operator: 'past_due' }]), actions: JSON.stringify([{ type: 'notify', target: 'admin', message: 'Task overdue' }, { type: 'update_task', field: 'status', value: 'blocked' }]), enabled: 1, runs: 12, last_run: new Date(Date.now() - 86400000).toISOString() },
+      { name: 'Welcome new team members', description: 'Welcome message on registration', trigger: 'user_registered', conditions: JSON.stringify([]), actions: JSON.stringify([{ type: 'send_message', channel: 'general', message: 'Welcome {{user.name}} to the team! 🎉' }]), enabled: 1, runs: 1, last_run: new Date(Date.now() - 36000000).toISOString() },
     ];
     const insert = db.prepare('INSERT INTO workflows (name, description, trigger, conditions, actions, enabled, runs, last_run) VALUES (@name, @description, @trigger, @conditions, @actions, @enabled, @runs, @last_run)');
     for (const wf of defaults) insert.run(wf);
@@ -29,7 +29,7 @@ function rowToWorkflow(row) {
 function getWorkflows() { return db.prepare('SELECT * FROM workflows ORDER BY created_at DESC').all().map(rowToWorkflow); }
 
 function createWorkflow(data, userId) {
-  const result = db.prepare('INSERT INTO workflows (name, description, trigger, conditions, actions, enabled, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)').run(data.name, data.description || '', data.trigger, JSON.stringify(data.conditions || []), JSON.stringify(data.actions || []), data.enabled !== false, userId || null);
+  const result = db.prepare('INSERT INTO workflows (name, description, trigger, conditions, actions, enabled, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)').run(data.name, data.description || '', data.trigger, JSON.stringify(data.conditions || []), JSON.stringify(data.actions || []), data.enabled !== false ? 1 : 0, userId || null);
   return rowToWorkflow(db.prepare('SELECT * FROM workflows WHERE id = ?').get(result.lastInsertRowid));
 }
 
@@ -40,10 +40,10 @@ function updateWorkflow(id, data) {
   const params = [];
   if (data.name !== undefined) { updates.push('name = ?'); params.push(data.name); }
   if (data.description !== undefined) { updates.push('description = ?'); params.push(data.description); }
-  if (data.trigger !== undefined) { updates.push('"trigger" = ?'); params.push(data.trigger); }
+  if (data.trigger !== undefined) { updates.push('trigger = ?'); params.push(data.trigger); }
   if (data.conditions !== undefined) { updates.push('conditions = ?'); params.push(JSON.stringify(data.conditions)); }
   if (data.actions !== undefined) { updates.push('actions = ?'); params.push(JSON.stringify(data.actions)); }
-  if (data.enabled !== undefined) { updates.push('enabled = ?'); params.push(data.enabled); }
+  if (data.enabled !== undefined) { updates.push('enabled = ?'); params.push(data.enabled ? 1 : 0); }
   if (updates.length === 0) return rowToWorkflow(wf);
   updates.push('updated_at = CURRENT_TIMESTAMP');
   params.push(id);
@@ -95,7 +95,7 @@ function executeActions(actions, context) {
 }
 
 function processTrigger(triggerName, context = {}) {
-  const matchedWorkflows = db.prepare('SELECT * FROM workflows WHERE enabled = true AND "trigger" = ?').all(triggerName).map(rowToWorkflow);
+  const matchedWorkflows = db.prepare('SELECT * FROM workflows WHERE enabled = 1 AND trigger = ?').all(triggerName).map(rowToWorkflow);
   const results = [];
   for (const wf of matchedWorkflows) {
     if (evaluateConditions(wf.conditions, context)) {
@@ -116,7 +116,7 @@ function getExecutionLog(limit = 20) {
 
 function getWorkflowStats() {
   const total = db.prepare('SELECT COUNT(*) as c FROM workflows').get().c;
-  const enabled = db.prepare('SELECT COUNT(*) as c FROM workflows WHERE enabled = true').get().c;
+  const enabled = db.prepare('SELECT COUNT(*) as c FROM workflows WHERE enabled = 1').get().c;
   const totalRuns = db.prepare('SELECT COALESCE(SUM(runs), 0) as s FROM workflows').get().s;
   return { total, enabled, disabled: total - enabled, totalRuns, recentExecutions: getExecutionLog(5) };
 }

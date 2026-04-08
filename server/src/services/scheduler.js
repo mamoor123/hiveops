@@ -19,7 +19,7 @@ function stop() {
 async function checkSchedules() {
   const now = new Date().toISOString();
   let schedules;
-  try { schedules = await db.prepare('SELECT * FROM scheduled_tasks WHERE enabled = true AND (next_run IS NULL OR next_run <= ?)').all(now); } catch (err) { if (err.message.includes('no such table')) return; throw err; }
+  try { schedules = await db.prepare('SELECT * FROM scheduled_tasks WHERE enabled = 1 AND (next_run IS NULL OR next_run <= ?)').all(now); } catch (err) { if (err.message.includes('no such table')) return; throw err; }
   for (const schedule of schedules) {
     try { await executeSchedule(schedule); } catch (err) { console.error(`⏰ Schedule "${schedule.name}" failed:`, err.message); }
     const nextRun = calculateNextRun(schedule);
@@ -70,7 +70,7 @@ function deleteSchedule(id) { db.prepare('DELETE FROM scheduled_tasks WHERE id =
 function toggleSchedule(id) {
   const schedule = db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id);
   if (!schedule) return null;
-  const newEnabled = !schedule.enabled;
+  const newEnabled = schedule.enabled ? 0 : 1;
   const nextRun = newEnabled ? calculateNextRun(schedule) : null;
   db.prepare('UPDATE scheduled_tasks SET enabled = ?, next_run = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newEnabled, nextRun, id);
   return db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id);
@@ -80,7 +80,7 @@ function getSchedules() { try { return db.prepare('SELECT * FROM scheduled_tasks
 
 function getStatus() {
   let totalSchedules = 0, enabledSchedules = 0;
-  try { totalSchedules = db.prepare('SELECT COUNT(*) as c FROM scheduled_tasks').get().c; enabledSchedules = db.prepare('SELECT COUNT(*) as c FROM scheduled_tasks WHERE enabled = true').get().c; } catch {}
+  try { totalSchedules = db.prepare('SELECT COUNT(*) as c FROM scheduled_tasks').get().c; enabledSchedules = db.prepare('SELECT COUNT(*) as c FROM scheduled_tasks WHERE enabled = 1').get().c; } catch {}
   return { running: checkInterval !== null, totalSchedules, enabledSchedules };
 }
 

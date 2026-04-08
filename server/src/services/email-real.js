@@ -71,9 +71,9 @@ function seedEmails() {
   const count = db.prepare('SELECT COUNT(*) as c FROM emails').get().c;
   if (count > 0) return;
   const demo = [
-    { from_addr: 'client@acmecorp.com', to_addr: 'sales@company.com', subject: 'Q2 Partnership Proposal', body: 'Hi team,\n\nWe\'d like to discuss a potential partnership for Q2.\n\nBest regards,\nSarah Chen', folder: 'inbox', read: false, starred: true, labels: JSON.stringify(['sales', 'urgent']), date: new Date(Date.now() - 3600000).toISOString() },
-    { from_addr: 'support@vendor.io', to_addr: 'admin@company.com', subject: 'Your API key has been renewed', body: 'Your API key has been renewed until December 2026.\n\nNo action required.', folder: 'inbox', read: true, starred: false, labels: JSON.stringify(['system']), date: new Date(Date.now() - 7200000).toISOString() },
-    { from_addr: 'newsletter@industry.com', to_addr: 'marketing@company.com', subject: 'Weekly Industry Digest - AI Trends', body: 'This week in AI:\n1. New LLM benchmarks released\n2. Enterprise adoption up 40%\n3. Regulatory updates from EU', folder: 'inbox', read: false, starred: false, labels: JSON.stringify(['newsletter']), date: new Date(Date.now() - 10800000).toISOString() },
+    { from_addr: 'client@acmecorp.com', to_addr: 'sales@company.com', subject: 'Q2 Partnership Proposal', body: 'Hi team,\n\nWe\'d like to discuss a potential partnership for Q2.\n\nBest regards,\nSarah Chen', folder: 'inbox', read: 0, starred: 1, labels: JSON.stringify(['sales', 'urgent']), date: new Date(Date.now() - 3600000).toISOString() },
+    { from_addr: 'support@vendor.io', to_addr: 'admin@company.com', subject: 'Your API key has been renewed', body: 'Your API key has been renewed until December 2026.\n\nNo action required.', folder: 'inbox', read: 1, starred: 0, labels: JSON.stringify(['system']), date: new Date(Date.now() - 7200000).toISOString() },
+    { from_addr: 'newsletter@industry.com', to_addr: 'marketing@company.com', subject: 'Weekly Industry Digest - AI Trends', body: 'This week in AI:\n1. New LLM benchmarks released\n2. Enterprise adoption up 40%\n3. Regulatory updates from EU', folder: 'inbox', read: 0, starred: 0, labels: JSON.stringify(['newsletter']), date: new Date(Date.now() - 10800000).toISOString() },
   ];
   const insert = db.prepare('INSERT INTO emails (from_addr, to_addr, subject, body, folder, read, starred, labels, date) VALUES (@from_addr, @to_addr, @subject, @body, @folder, @read, @starred, @labels, @date)');
   for (const email of demo) insert.run(email);
@@ -86,8 +86,8 @@ function rowToEmail(row) { if (!row) return null; return { ...row, from: row.fro
 function getEmails(folder = 'inbox', options = {}) {
   let query = 'SELECT * FROM emails WHERE folder = ?';
   const params = [folder];
-  if (options.unreadOnly) query += ' AND read = false';
-  if (options.starred) query += ' AND starred = true';
+  if (options.unreadOnly) query += ' AND read = 0';
+  if (options.starred) query += ' AND starred = 1';
   if (options.label) { query += ' AND labels LIKE ?'; params.push(`%"${options.label}"%`); }
   if (options.search) { query += ' AND (subject LIKE ? OR body LIKE ? OR from_addr LIKE ?)'; const q = `%${options.search}%`; params.push(q, q, q); }
   query += ' ORDER BY date DESC';
@@ -95,7 +95,7 @@ function getEmails(folder = 'inbox', options = {}) {
 }
 
 function getEmail(id) { return rowToEmail(db.prepare('SELECT * FROM emails WHERE id = ?').get(id)); }
-function markRead(id) { db.prepare('UPDATE emails SET read = true WHERE id = ?').run(id); return getEmail(id); }
+function markRead(id) { db.prepare('UPDATE emails SET read = 1 WHERE id = ?').run(id); return getEmail(id); }
 function toggleStar(id) { db.prepare('UPDATE emails SET starred = NOT starred WHERE id = ?').run(id); return getEmail(id); }
 function moveToFolder(id, folder) { db.prepare('UPDATE emails SET folder = ? WHERE id = ?').run(folder, id); return getEmail(id); }
 
@@ -106,7 +106,7 @@ async function sendEmail({ to, subject, body, inReplyTo, userId }) {
     try { await transport.sendMail({ from: process.env.SMTP_FROM || 'no-reply@hiveops.local', to, subject, text: body || '' }); realSent = true; console.log(`📧 Sent via SMTP: ${subject} → ${to}`); }
     catch (err) { realError = err.message; console.error(`📧 SMTP send failed, saving to DB only: ${err.message}`); }
   }
-  const result = await db.prepare("INSERT INTO emails (from_addr, to_addr, subject, body, folder, read, starred, in_reply_to, user_id) VALUES (?, ?, ?, ?, 'sent', true, false, ?, ?)").run(process.env.SMTP_FROM || 'admin@hiveops.local', to, subject, body || '', inReplyTo || null, userId || null);
+  const result = await db.prepare("INSERT INTO emails (from_addr, to_addr, subject, body, folder, read, starred, in_reply_to, user_id) VALUES (?, ?, ?, ?, 'sent', 1, 0, ?, ?)").run(process.env.SMTP_FROM || 'admin@hiveops.local', to, subject, body || '', inReplyTo || null, userId || null);
   const email = getEmail(result.lastInsertRowid);
   email.realSent = realSent;
   if (realError) email.smtpError = realError;
@@ -114,17 +114,17 @@ async function sendEmail({ to, subject, body, inReplyTo, userId }) {
 }
 
 function saveDraft({ to, subject, body, userId }) {
-  const result = db.prepare("INSERT INTO emails (from_addr, to_addr, subject, body, folder, read, starred, user_id) VALUES (?, ?, ?, ?, 'drafts', true, false, ?)").run('admin@hiveops.local', to || '', subject || '(no subject)', body || '', userId || null);
+  const result = db.prepare("INSERT INTO emails (from_addr, to_addr, subject, body, folder, read, starred, user_id) VALUES (?, ?, ?, ?, 'drafts', 1, 0, ?)").run('admin@hiveops.local', to || '', subject || '(no subject)', body || '', userId || null);
   return getEmail(result.lastInsertRowid);
 }
 
 function getEmailStats() {
   return {
     inbox: db.prepare("SELECT COUNT(*) as c FROM emails WHERE folder = 'inbox'").get().c,
-    unread: db.prepare("SELECT COUNT(*) as c FROM emails WHERE folder = 'inbox' AND read = false").get().c,
+    unread: db.prepare("SELECT COUNT(*) as c FROM emails WHERE folder = 'inbox' AND read = 0").get().c,
     sent: db.prepare("SELECT COUNT(*) as c FROM emails WHERE folder = 'sent'").get().c,
     drafts: db.prepare("SELECT COUNT(*) as c FROM emails WHERE folder = 'drafts'").get().c,
-    starred: db.prepare("SELECT COUNT(*) as c FROM emails WHERE starred = true").get().c,
+    starred: db.prepare("SELECT COUNT(*) as c FROM emails WHERE starred = 1").get().c,
     smtpConfigured: !!getSmtpTransport(), imapConfigured: !!process.env.IMAP_HOST,
   };
 }
