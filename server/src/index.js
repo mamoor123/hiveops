@@ -7,6 +7,7 @@ const jwt = require('jsonwebtoken');
 const db = require('./config/db');
 const { JWT_SECRET } = require('./middleware/auth');
 const { chatWithAgent } = require('./services/ai-engine');
+const notificationService = require('./services/notifications');
 
 const app = express();
 const server = http.createServer(app);
@@ -31,6 +32,7 @@ app.use('/api/ai', require('./routes/ai'));
 app.use('/api/knowledge', require('./routes/knowledge'));
 app.use('/api/email', require('./routes/email'));
 app.use('/api/workflows', require('./routes/workflows'));
+app.use('/api/notifications', require('./routes/notifications'));
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -60,6 +62,9 @@ io.use((socket, next) => {
 
 io.on('connection', (socket) => {
   console.log(`⚡ User connected: ${socket.user.name}`);
+
+  // Join user's personal room for notifications
+  socket.join(`user:${socket.user.id}`);
 
   socket.on('join-channel', (channel) => {
     socket.join(channel);
@@ -164,6 +169,9 @@ function seedDefaults() {
 }
 
 seedDefaults();
+
+// Initialize notification service with Socket.IO
+notificationService.setIO(io);
 
 server.listen(PORT, () => {
   console.log(`

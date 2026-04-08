@@ -1,18 +1,22 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../lib/auth';
+import { useToast } from '../../components/Toast';
 import { api } from '../../lib/api';
 import { useRouter } from 'next/navigation';
+import TaskDetailModal from '../../components/TaskDetailModal';
 
 export default function TasksPage() {
   const { user } = useAuth();
   const router = useRouter();
+  const toast = useToast();
   const [tasks, setTasks] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [agents, setAgents] = useState([]);
   const [users, setUsers] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [filter, setFilter] = useState({ status: '', priority: '' });
+  const [selectedTask, setSelectedTask] = useState(null);
   const [form, setForm] = useState({
     title: '', description: '', priority: 'medium', department_id: '',
     assigned_to: '', assigned_agent_id: '', due_date: ''
@@ -42,7 +46,6 @@ export default function TasksPage() {
   };
 
   const handleCreate = async () => {
-    
     try {
       const data = { ...form };
       if (!data.department_id) delete data.department_id;
@@ -53,26 +56,29 @@ export default function TasksPage() {
       setShowForm(false);
       setForm({ title: '', description: '', priority: 'medium', department_id: '', assigned_to: '', assigned_agent_id: '', due_date: '' });
       loadData();
-    } catch (err) { alert(err.message); }
+      toast.success('Task created');
+    } catch (err) { toast.error(err.message); }
   };
 
   const updateStatus = async (id, status) => {
     await api.updateTask(id, { status });
     loadData();
+    toast.success(`Task marked as ${status.replace('_', ' ')}`);
   };
 
   const deleteTask = async (id) => {
     if (!confirm('Delete this task?')) return;
     await api.deleteTask(id);
     setTasks(tasks.filter(t => t.id !== id));
+    toast.success('Task deleted');
   };
 
   const executeTask = async (id) => {
     try {
       await api.executeTask(id);
       loadData();
-      alert('Task executed! Check comments for agent response.');
-    } catch (err) { alert(err.message); }
+      toast.success('Task executed — check comments for agent response');
+    } catch (err) { toast.error(err.message); }
   };
 
   return (
@@ -162,7 +168,8 @@ export default function TasksPage() {
           </div>
         ) : (
           tasks.map(t => (
-            <div key={t.id} className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div key={t.id} className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
+              onClick={(e) => { if (e.target.tagName !== 'BUTTON' && e.target.tagName !== 'SELECT' && e.target.tagName !== 'OPTION') setSelectedTask(t.id); }}>
               <div style={{ flex: 1 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                   <h4 style={{ fontSize: '0.9rem', fontWeight: 600 }}>{t.title}</h4>
@@ -175,7 +182,7 @@ export default function TasksPage() {
                   {t.due_date && ` · 📅 ${new Date(t.due_date).toLocaleDateString()}`}
                 </p>
               </div>
-              <div style={{ display: 'flex', gap: '4px' }}>
+              <div style={{ display: 'flex', gap: '4px' }} onClick={e => e.stopPropagation()}>
                 {t.agent_name && t.status !== 'completed' && (
                   <button onClick={() => executeTask(t.id)} className="btn" style={{ padding: '4px 10px', fontSize: '0.75rem' }}>
                     ▶ Execute
@@ -197,6 +204,14 @@ export default function TasksPage() {
           ))
         )}
       </div>
+
+      {selectedTask && (
+        <TaskDetailModal
+          taskId={selectedTask}
+          onClose={() => setSelectedTask(null)}
+          onUpdate={loadData}
+        />
+      )}
     </div>
   );
 }

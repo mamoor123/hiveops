@@ -33,4 +33,29 @@ router.get('/', authMiddleware, (req, res) => {
   res.json(stats);
 });
 
+// Activity — task creation/completion counts by day
+router.get('/activity', authMiddleware, (req, res) => {
+  const days = parseInt(req.query.days) || 7;
+  const labels = [];
+  const created = [];
+  const completed = [];
+
+  for (let i = days - 1; i >= 0; i--) {
+    const date = new Date();
+    date.setDate(date.getDate() - i);
+    const dateStr = date.toISOString().split('T')[0];
+    labels.push(date.toLocaleDateString('en', { weekday: 'short' }));
+
+    created.push(db.prepare(
+      "SELECT COUNT(*) as count FROM tasks WHERE DATE(created_at) = ?"
+    ).get(dateStr).count);
+
+    completed.push(db.prepare(
+      "SELECT COUNT(*) as count FROM tasks WHERE DATE(completed_at) = ?"
+    ).get(dateStr).count);
+  }
+
+  res.json({ labels, created, completed });
+});
+
 module.exports = router;

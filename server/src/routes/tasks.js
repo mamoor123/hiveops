@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { validateBody, sanitizeBody } = require('../middleware/validate');
+const notificationService = require('../services/notifications');
 
 const router = express.Router();
 
@@ -34,6 +35,26 @@ router.get('/', authMiddleware, (req, res) => {
   res.json(tasks);
 });
 
+// Get single task
+router.get('/:id', authMiddleware, (req, res) => {
+  const task = db.prepare(`
+    SELECT t.*, 
+      d.name as department_name, d.icon as department_icon, d.color as department_color,
+      u1.name as assignee_name, u1.email as assignee_email,
+      a.name as agent_name,
+      u2.name as creator_name
+    FROM tasks t
+    LEFT JOIN departments d ON t.department_id = d.id
+    LEFT JOIN users u1 ON t.assigned_to = u1.id
+    LEFT JOIN agents a ON t.assigned_agent_id = a.id
+    LEFT JOIN users u2 ON t.created_by = u2.id
+    WHERE t.id = ?
+  `).get(req.params.id);
+
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+  res.json(task);
+});
+
 // Create task
 router.post('/', authMiddleware, sanitizeBody(['title', 'description']), validateBody(['title']), (req, res) => {
   const { title, description, priority, department_id, assigned_to, assigned_agent_id, due_date } = req.body;
@@ -51,11 +72,27 @@ router.post('/', authMiddleware, sanitizeBody(['title', 'description']), validat
     WHERE t.id = ?
   `).get(result.lastInsertRowid);
 
+  // Notify assignee
+  if (assigned_to && assigned_to !== req.user.id) {
+    notificationService.notify({
+      userId: assigned_to,
+      type: 'task_assigned',
+      title: 'New task assigned to you',
+      body: `"${title}" — ${priority} priority`,
+      link: `/tasks`,
+      data: { taskId: result.lastInsertRowid },
+    });
+  }
+
   res.status(201).json(task);
 });
 
 // Update task
 router.put('/:id', authMiddleware, (req, res) => {
+  // Get current task before update for comparison
+  const currentTask = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+  if (!currentTask) return res.status(404).json({ error: 'Task not found' });
+
   const { title, description, status, priority, assigned_to, assigned_agent_id, due_date } = req.body;
 
   const updates = [];
@@ -79,6 +116,33 @@ router.put('/:id', authMiddleware, (req, res) => {
   db.prepare(`UPDATE tasks SET ${updates.join(', ')} WHERE id = ?`).run(...params);
 
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+
+  // Notifications for status changes
+  if (status && status !== currentTask.status) {
+    if (status === 'completed' && currentTask.created_by !== req.user.id) {
+      notificationService.notify({
+        userId: currentTask.created_by,
+        type: 'task_completed',
+        title: 'Task completed',
+        body: `"${task.title}" has been marked as done`,
+        link: `/tasks`,
+        data: { taskId: task.id },
+      });
+    }
+  }
+
+  // Notify new assignee
+  if (assigned_to && assigned_to !== currentTask.assigned_to && assigned_to !== req.user.id) {
+    notificationService.notify({
+      userId: assigned_to,
+      type: 'task_assigned',
+      title: 'Task assigned to you',
+      body: `"${task.title}"`,
+      link: `/tasks`,
+      data: { taskId: task.id },
+    });
+  }
+
   res.json(task);
 });
 
@@ -95,6 +159,25 @@ router.post('/:id/comments', authMiddleware, (req, res) => {
     LEFT JOIN users u ON c.user_id = u.id
     WHERE c.task_id = ? ORDER BY c.created_at
   `).all(req.params.id);
+
+  // Notify task owner and assignee about the comment
+  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+  if (task) {
+    const notifyIds = new Set();
+    if (task.created_by && task.created_by !== req.user.id) notifyIds.add(task.created_by);
+    if (task.assigned_to && task.assigned_to !== req.user.id) notifyIds.add(task.assigned_to);
+
+    for (const uid of notifyIds) {
+      notificationService.notify({
+        userId: uid,
+        type: 'task_comment',
+        title: 'New comment on task',
+        body: `"${task.title}" — ${req.user.name}: ${content.slice(0, 80)}`,
+        link: `/tasks`,
+        data: { taskId: task.id },
+      });
+    }
+  }
 
   res.status(201).json(comments);
 });

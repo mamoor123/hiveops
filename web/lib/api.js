@@ -22,6 +22,7 @@ export const api = {
 
   // Dashboard
   getDashboard: () => request('/api/dashboard'),
+  getActivity: (days = 7) => request(`/api/dashboard/activity?days=${days}`),
 
   // Departments
   getDepartments: () => request('/api/departments'),
@@ -30,7 +31,17 @@ export const api = {
   updateDepartment: (id, data) => request(`/api/departments/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteDepartment: (id) => request(`/api/departments/${id}`, { method: 'DELETE' }),
 
+  // Notifications
+  getNotifications: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/api/notifications${qs ? `?${qs}` : ''}`);
+  },
+  getUnreadCount: () => request('/api/notifications/unread-count'),
+  markNotificationRead: (id) => request(`/api/notifications/${id}/read`, { method: 'POST' }),
+  markAllNotificationsRead: () => request('/api/notifications/read-all', { method: 'POST' }),
+
   // Tasks
+  getTask: (id) => request(`/api/tasks/${id}`),
   getTasks: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return request(`/api/tasks${qs ? `?${qs}` : ''}`);

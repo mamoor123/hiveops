@@ -1,8 +1,40 @@
 'use client';
 import './globals.css';
 import { AuthProvider, useAuth } from '../lib/auth';
+import { ToastProvider } from '../components/Toast';
+import NotificationBell from '../components/NotificationBell';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect, useRef } from 'react';
+import { io } from 'socket.io-client';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+
+function SocketConnector() {
+  const { user } = useAuth();
+  const socketRef = useRef(null);
+
+  useEffect(() => {
+    if (!user) return;
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    const socket = io(API_URL, { auth: { token } });
+    socketRef.current = socket;
+
+    // Forward notification events to window for components to listen
+    socket.on('notification', (n) => {
+      window.dispatchEvent(new CustomEvent('notification', { detail: n }));
+    });
+
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [user]);
+
+  return null;
+}
 
 function Sidebar() {
   const { user, logout } = useAuth();
@@ -47,8 +79,13 @@ function Sidebar() {
       </nav>
 
       <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
-        <p style={{ fontSize: '0.8rem', marginBottom: '4px' }}>{user.name}</p>
-        <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '8px' }}>{user.role}</p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <div>
+            <p style={{ fontSize: '0.8rem', marginBottom: '2px' }}>{user.name}</p>
+            <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{user.role}</p>
+          </div>
+          <NotificationBell />
+        </div>
         <button onClick={logout} className="btn btn-ghost" style={{ width: '100%', fontSize: '0.8rem' }}>
           Sign Out
         </button>
@@ -77,7 +114,10 @@ export default function RootLayout({ children }) {
     <html lang="en">
       <body>
         <AuthProvider>
-          <AppShell>{children}</AppShell>
+          <ToastProvider>
+            <SocketConnector />
+            <AppShell>{children}</AppShell>
+          </ToastProvider>
         </AuthProvider>
       </body>
     </html>

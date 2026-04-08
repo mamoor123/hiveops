@@ -10,6 +10,7 @@ export default function AnalyticsPage() {
   const [dashboard, setDashboard] = useState(null);
   const [departments, setDepartments] = useState([]);
   const [tasks, setTasks] = useState([]);
+  const [activity, setActivity] = useState({ labels: [], created: [], completed: [] });
 
   useEffect(() => {
     if (!user) { router.push('/login'); return; }
@@ -17,10 +18,12 @@ export default function AnalyticsPage() {
       api.getDashboard(),
       api.getDepartments(),
       api.getTasks(),
-    ]).then(([d, dep, t]) => {
+      api.getActivity(7),
+    ]).then(([d, dep, t, act]) => {
       setDashboard(d);
       setDepartments(dep);
       setTasks(t);
+      setActivity(act);
     }).catch(console.error);
   }, [user]);
 
@@ -58,10 +61,10 @@ export default function AnalyticsPage() {
 
   const maxDeptTasks = Math.max(...deptTasks.map(d => d.tasks), 1);
 
-  // Activity (last 7 days mock)
-  const activityDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const activityData = [3, 5, 2, 7, 4, 1, 6];
-  const maxActivity = Math.max(...activityData);
+  // Activity (real data from API)
+  const activityDays = activity.labels;
+  const activityData = activity.created;
+  const maxActivity = Math.max(...activityData, 1);
 
   // Donut chart component
   const DonutChart = ({ value, max, color, size = 120, label }) => {
