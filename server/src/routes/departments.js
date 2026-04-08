@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../config/db');
 const { authMiddleware, adminOnly } = require('../middleware/auth');
+const { validateBody, sanitizeBody } = require('../middleware/validate');
 
 const router = express.Router();
 
@@ -17,9 +18,8 @@ router.get('/', authMiddleware, (req, res) => {
 });
 
 // Create department
-router.post('/', authMiddleware, adminOnly, (req, res) => {
+router.post('/', authMiddleware, adminOnly, sanitizeBody(['name', 'description']), validateBody(['name']), (req, res) => {
   const { name, description, icon, color } = req.body;
-  if (!name) return res.status(400).json({ error: 'Name is required' });
 
   try {
     const result = db.prepare(

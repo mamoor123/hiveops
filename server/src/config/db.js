@@ -106,6 +106,50 @@ db.exec(`
     FOREIGN KEY (department_id) REFERENCES departments(id),
     FOREIGN KEY (created_by) REFERENCES users(id)
   );
+
+  CREATE TABLE IF NOT EXISTS workflows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    trigger TEXT NOT NULL,
+    conditions TEXT DEFAULT '[]',
+    actions TEXT DEFAULT '[]',
+    enabled INTEGER DEFAULT 1,
+    runs INTEGER DEFAULT 0,
+    last_run DATETIME,
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS workflow_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workflow_id INTEGER NOT NULL,
+    trigger TEXT NOT NULL,
+    context TEXT DEFAULT '{}',
+    results TEXT DEFAULT '[]',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS emails (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_addr TEXT NOT NULL,
+    to_addr TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    body TEXT DEFAULT '',
+    folder TEXT DEFAULT 'inbox' CHECK(folder IN ('inbox', 'sent', 'drafts', 'trash', 'archive')),
+    read INTEGER DEFAULT 0,
+    starred INTEGER DEFAULT 0,
+    labels TEXT DEFAULT '[]',
+    in_reply_to INTEGER,
+    user_id INTEGER,
+    date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (in_reply_to) REFERENCES emails(id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
 `);
 
 module.exports = db;

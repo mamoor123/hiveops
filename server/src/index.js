@@ -11,14 +11,14 @@ const { chatWithAgent } = require('./services/ai-engine');
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: '*', methods: ['GET', 'POST'] }
+  cors: { origin: process.env.CORS_ORIGIN || 'http://localhost:3000', methods: ['GET', 'POST'] }
 });
 
 const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors());
+app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:3000' }));
 app.use(express.json());
 
 // Routes
@@ -35,6 +35,15 @@ app.use('/api/workflows', require('./routes/workflows'));
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err.message);
+  if (process.env.NODE_ENV === 'development') {
+    console.error(err.stack);
+  }
+  res.status(500).json({ error: 'Internal server error' });
 });
 
 // Socket.IO for real-time chat

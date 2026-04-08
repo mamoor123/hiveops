@@ -1,130 +1,133 @@
 /**
- * Workflow Engine
- * 
+ * Workflow Engine (SQLite-backed)
+ *
  * Automates task assignment, escalation, and notifications
  * based on configurable triggers and rules.
  */
 
 const db = require('../config/db');
 
-// Workflow rules storage
-let workflows = [];
-let workflowIdCounter = 1;
-let executionLog = [];
-
 /**
- * Seed default workflows
+ * Seed default workflows if none exist
  */
 function seedWorkflows() {
-  if (workflows.length > 0) return;
+  const count = db.prepare('SELECT COUNT(*) as c FROM workflows').get().c;
+  if (count > 0) return;
 
-  workflows = [
+  const defaults = [
     {
-      id: workflowIdCounter++,
       name: 'Auto-assign urgent tasks to department manager',
-      description: 'When a task is created with urgent priority, assign to the department manager',
+      description: 'When a task is created with urgent priority, notify the department manager',
       trigger: 'task_created',
-      conditions: [{ field: 'priority', operator: 'equals', value: 'urgent' }],
-      actions: [{ type: 'notify', target: 'department_manager', message: 'Urgent task created: {{task.title}}' }],
-      enabled: true,
-      runs: 3,
-      lastRun: new Date(Date.now() - 3600000).toISOString(),
+      conditions: JSON.stringify([{ field: 'priority', operator: 'equals', value: 'urgent' }]),
+      actions: JSON.stringify([{ type: 'notify', target: 'department_manager', message: 'Urgent task created: {{task.title}}' }]),
+      enabled: 1, runs: 3, last_run: new Date(Date.now() - 3600000).toISOString(),
     },
     {
-      id: workflowIdCounter++,
       name: 'Escalate overdue tasks',
       description: 'When a task is past its due date, escalate to admin and mark as blocked',
       trigger: 'schedule_daily',
-      conditions: [{ field: 'due_date', operator: 'past_due' }],
-      actions: [
+      conditions: JSON.stringify([{ field: 'due_date', operator: 'past_due' }]),
+      actions: JSON.stringify([
         { type: 'notify', target: 'admin', message: 'Task overdue: {{task.title}}' },
         { type: 'update_task', field: 'status', value: 'blocked' },
-      ],
-      enabled: true,
-      runs: 12,
-      lastRun: new Date(Date.now() - 86400000).toISOString(),
+      ]),
+      enabled: 1, runs: 12, last_run: new Date(Date.now() - 86400000).toISOString(),
     },
     {
-      id: workflowIdCounter++,
       name: 'Auto-execute marketing agent tasks',
       description: 'Automatically execute tasks assigned to marketing agent',
       trigger: 'task_assigned_to_agent',
-      conditions: [{ field: 'department', operator: 'equals', value: 'Marketing' }],
-      actions: [{ type: 'execute_agent', delay: '5m' }],
-      enabled: false,
-      runs: 0,
-      lastRun: null,
+      conditions: JSON.stringify([{ field: 'department', operator: 'equals', value: 'Marketing' }]),
+      actions: JSON.stringify([{ type: 'execute_agent', delay: '5m' }]),
+      enabled: 0, runs: 0, last_run: null,
     },
     {
-      id: workflowIdCounter++,
       name: 'Welcome new team members',
       description: 'Send welcome message when a new user registers',
       trigger: 'user_registered',
-      conditions: [],
-      actions: [
+      conditions: JSON.stringify([]),
+      actions: JSON.stringify([
         { type: 'send_message', channel: 'general', message: 'Welcome {{user.name}} to the team! 🎉' },
-      ],
-      enabled: true,
-      runs: 1,
-      lastRun: new Date(Date.now() - 36000000).toISOString(),
+      ]),
+      enabled: 1, runs: 1, last_run: new Date(Date.now() - 36000000).toISOString(),
     },
   ];
+
+  const insert = db.prepare(`
+    INSERT INTO workflows (name, description, trigger, conditions, actions, enabled, runs, last_run)
+    VALUES (@name, @description, @trigger, @conditions, @actions, @enabled, @runs, @last_run)
+  `);
+
+  for (const wf of defaults) {
+    insert.run(wf);
+  }
+  console.log('✅ Seeded default workflows');
 }
 
 seedWorkflows();
 
-/**
- * Get all workflows
- */
-function getWorkflows() {
-  return workflows;
-}
-
-/**
- * Create workflow
- */
-function createWorkflow(data) {
-  const workflow = {
-    id: workflowIdCounter++,
-    name: data.name,
-    description: data.description || '',
-    trigger: data.trigger,
-    conditions: data.conditions || [],
-    actions: data.actions || [],
-    enabled: data.enabled !== false,
-    runs: 0,
-    lastRun: null,
-    createdAt: new Date().toISOString(),
+function rowToWorkflow(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    conditions: JSON.parse(row.conditions || '[]'),
+    actions: JSON.parse(row.actions || '[]'),
+    enabled: !!row.enabled,
   };
-  workflows.push(workflow);
-  return workflow;
 }
 
-/**
- * Update workflow
- */
+function getWorkflows() {
+  return db.prepare('SELECT * FROM workflows ORDER BY created_at DESC').all().map(rowToWorkflow);
+}
+
+function createWorkflow(data, userId) {
+  const result = db.prepare(`
+    INSERT INTO workflows (name, description, trigger, conditions, actions, enabled, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    data.name,
+    data.description || '',
+    data.trigger,
+    JSON.stringify(data.conditions || []),
+    JSON.stringify(data.actions || []),
+    data.enabled !== false ? 1 : 0,
+    userId || null,
+  );
+  return rowToWorkflow(db.prepare('SELECT * FROM workflows WHERE id = ?').get(result.lastInsertRowid));
+}
+
 function updateWorkflow(id, data) {
-  const wf = workflows.find(w => w.id === parseInt(id));
+  const wf = db.prepare('SELECT * FROM workflows WHERE id = ?').get(id);
   if (!wf) return null;
-  Object.assign(wf, data);
-  return wf;
+
+  const updates = [];
+  const params = [];
+
+  if (data.name !== undefined) { updates.push('name = ?'); params.push(data.name); }
+  if (data.description !== undefined) { updates.push('description = ?'); params.push(data.description); }
+  if (data.trigger !== undefined) { updates.push('trigger = ?'); params.push(data.trigger); }
+  if (data.conditions !== undefined) { updates.push('conditions = ?'); params.push(JSON.stringify(data.conditions)); }
+  if (data.actions !== undefined) { updates.push('actions = ?'); params.push(JSON.stringify(data.actions)); }
+  if (data.enabled !== undefined) { updates.push('enabled = ?'); params.push(data.enabled ? 1 : 0); }
+
+  if (updates.length === 0) return rowToWorkflow(wf);
+
+  updates.push('updated_at = CURRENT_TIMESTAMP');
+  params.push(id);
+
+  db.prepare(`UPDATE workflows SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+  return rowToWorkflow(db.prepare('SELECT * FROM workflows WHERE id = ?').get(id));
 }
 
-/**
- * Delete workflow
- */
 function deleteWorkflow(id) {
-  workflows = workflows.filter(w => w.id !== parseInt(id));
+  db.prepare('DELETE FROM workflows WHERE id = ?').run(id);
   return true;
 }
 
-/**
- * Toggle workflow
- */
 function toggleWorkflow(id) {
-  const wf = workflows.find(w => w.id === parseInt(id));
-  if (wf) wf.enabled = !wf.enabled;
-  return wf;
+  db.prepare('UPDATE workflows SET enabled = NOT enabled, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(id);
+  return rowToWorkflow(db.prepare('SELECT * FROM workflows WHERE id = ?').get(id));
 }
 
 /**
@@ -157,7 +160,6 @@ function executeActions(actions, context) {
   for (const action of actions) {
     try {
       let message = action.message || '';
-      // Template replacement
       message = message.replace(/\{\{(\w+)\.(\w+)\}\}/g, (_, obj, field) => {
         return context[obj]?.[field] || `[${obj}.${field}]`;
       });
@@ -198,50 +200,72 @@ function executeActions(actions, context) {
  * Process a trigger event
  */
 function processTrigger(triggerName, context = {}) {
-  const matchedWorkflows = workflows.filter(w => w.enabled && w.trigger === triggerName);
+  const matchedWorkflows = db.prepare(
+    'SELECT * FROM workflows WHERE enabled = 1 AND trigger = ?'
+  ).all(triggerName).map(rowToWorkflow);
+
   const results = [];
 
   for (const wf of matchedWorkflows) {
     if (evaluateConditions(wf.conditions, context)) {
       const actionResults = executeActions(wf.actions, context);
-      wf.runs++;
-      wf.lastRun = new Date().toISOString();
 
-      const log = {
+      // Increment run count and update last_run
+      db.prepare('UPDATE workflows SET runs = runs + 1, last_run = CURRENT_TIMESTAMP WHERE id = ?').run(wf.id);
+
+      // Log execution
+      db.prepare(`
+        INSERT INTO workflow_logs (workflow_id, trigger, context, results)
+        VALUES (?, ?, ?, ?)
+      `).run(wf.id, triggerName, JSON.stringify(context), JSON.stringify(actionResults));
+
+      results.push({
         workflowId: wf.id,
         workflowName: wf.name,
         trigger: triggerName,
-        context,
         actions: actionResults,
-        timestamp: new Date().toISOString(),
-      };
-      executionLog.unshift(log);
-      if (executionLog.length > 100) executionLog = executionLog.slice(0, 100);
-
-      results.push(log);
+      });
     }
+  }
+
+  // Keep log table manageable (max 1000 entries)
+  const logCount = db.prepare('SELECT COUNT(*) as c FROM workflow_logs').get().c;
+  if (logCount > 1000) {
+    db.prepare(`
+      DELETE FROM workflow_logs WHERE id IN (
+        SELECT id FROM workflow_logs ORDER BY created_at ASC LIMIT ?
+      )
+    `).run(logCount - 1000);
   }
 
   return results;
 }
 
-/**
- * Get execution log
- */
 function getExecutionLog(limit = 20) {
-  return executionLog.slice(0, limit);
+  return db.prepare(`
+    SELECT wl.*, w.name as workflow_name
+    FROM workflow_logs wl
+    LEFT JOIN workflows w ON wl.workflow_id = w.id
+    ORDER BY wl.created_at DESC
+    LIMIT ?
+  `).all(limit).map(row => ({
+    ...row,
+    context: JSON.parse(row.context || '{}'),
+    results: JSON.parse(row.results || '[]'),
+  }));
 }
 
-/**
- * Get workflow stats
- */
 function getWorkflowStats() {
+  const total = db.prepare('SELECT COUNT(*) as c FROM workflows').get().c;
+  const enabled = db.prepare('SELECT COUNT(*) as c FROM workflows WHERE enabled = 1').get().c;
+  const totalRuns = db.prepare('SELECT COALESCE(SUM(runs), 0) as s FROM workflows').get().s;
+
   return {
-    total: workflows.length,
-    enabled: workflows.filter(w => w.enabled).length,
-    disabled: workflows.filter(w => !w.enabled).length,
-    totalRuns: workflows.reduce((sum, w) => sum + w.runs, 0),
-    recentExecutions: executionLog.slice(0, 5),
+    total,
+    enabled,
+    disabled: total - enabled,
+    totalRuns,
+    recentExecutions: getExecutionLog(5),
   };
 }
 

@@ -3,15 +3,24 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('../config/db');
 const { authMiddleware, JWT_SECRET } = require('../middleware/auth');
+const { validateBody, sanitizeBody } = require('../middleware/validate');
+const { rateLimiter } = require('../middleware/rateLimit');
 
 const router = express.Router();
+const authRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, maxAttempts: 20 });
 
 // Register
-router.post('/register', (req, res) => {
+router.post('/register', authRateLimit, sanitizeBody(['email', 'name']), validateBody(['email', 'password', 'name']), (req, res) => {
   try {
     const { email, password, name, role } = req.body;
-    if (!email || !password || !name) {
-      return res.status(400).json({ error: 'Email, password, and name are required' });
+
+    // Basic email format check
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
     }
 
     const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
@@ -42,12 +51,9 @@ router.post('/register', (req, res) => {
 });
 
 // Login
-router.post('/login', (req, res) => {
+router.post('/login', authRateLimit, sanitizeBody(['email']), validateBody(['email', 'password']), (req, res) => {
   try {
     const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' });
-    }
 
     const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
     if (!user || !bcrypt.compareSync(password, user.password_hash)) {

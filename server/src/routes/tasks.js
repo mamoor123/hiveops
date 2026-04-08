@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
+const { validateBody, sanitizeBody } = require('../middleware/validate');
 
 const router = express.Router();
 
@@ -34,9 +35,8 @@ router.get('/', authMiddleware, (req, res) => {
 });
 
 // Create task
-router.post('/', authMiddleware, (req, res) => {
+router.post('/', authMiddleware, sanitizeBody(['title', 'description']), validateBody(['title']), (req, res) => {
   const { title, description, priority, department_id, assigned_to, assigned_agent_id, due_date } = req.body;
-  if (!title) return res.status(400).json({ error: 'Title is required' });
 
   const result = db.prepare(`
     INSERT INTO tasks (title, description, priority, department_id, assigned_to, assigned_agent_id, created_by, due_date)
