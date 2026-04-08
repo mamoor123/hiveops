@@ -1,12 +1,14 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../lib/auth';
+import { useToast } from '../../components/Toast';
 import { api } from '../../lib/api';
 import { useRouter } from 'next/navigation';
 
 export default function KnowledgePage() {
   const { user } = useAuth();
   const router = useRouter();
+  const toast = useToast();
   const [articles, setArticles] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -42,7 +44,7 @@ export default function KnowledgePage() {
   };
 
   const handleSave = async () => {
-    if (!form.title || !form.content) { alert('Title and content required'); return; }
+    if (!form.title || !form.content) { toast.error('Title and content required'); return; }
     try {
       const data = {
         ...form,
@@ -51,12 +53,14 @@ export default function KnowledgePage() {
       };
       if (editingId) {
         await api.updateArticle(editingId, data);
+        toast.success('Article updated');
       } else {
         await api.createArticle(data);
+        toast.success('Article published');
       }
       resetForm();
       loadData();
-    } catch (err) { alert(err.message); }
+    } catch (err) { toast.error(err.message); }
   };
 
   const handleEdit = (article) => {
@@ -77,6 +81,7 @@ export default function KnowledgePage() {
     await api.deleteArticle(id);
     setArticles(articles.filter(a => a.id !== id));
     setViewingArticle(null);
+    toast.success('Article deleted');
   };
 
   const resetForm = () => {

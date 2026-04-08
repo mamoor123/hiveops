@@ -1,46 +1,56 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../lib/auth';
+import { useToast } from '../../components/Toast';
 import { api } from '../../lib/api';
 import { useRouter } from 'next/navigation';
+import AgentEditModal from '../../components/AgentEditModal';
 
 export default function AgentsPage() {
   const { user } = useAuth();
   const router = useRouter();
+  const toast = useToast();
   const [agents, setAgents] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [showForm, setShowForm] = useState(false);
+  const [editingAgent, setEditingAgent] = useState(null);
   const [form, setForm] = useState({ name: '', role: '', department_id: '', system_prompt: '', model: 'gpt-4' });
 
   useEffect(() => {
     if (!user) { router.push('/login'); return; }
-    Promise.all([api.getAgents(), api.getDepartments()]).then(([a, d]) => {
-      setAgents(a);
-      setDepartments(d);
-    }).catch(console.error);
+    loadData();
   }, [user]);
 
+  const loadData = async () => {
+    try {
+      const [a, d] = await Promise.all([api.getAgents(), api.getDepartments()]);
+      setAgents(a);
+      setDepartments(d);
+    } catch (err) { console.error(err); }
+  };
+
   const handleCreate = async () => {
-    
     try {
       const agent = await api.createAgent(form);
-      const dept = departments.find(d => d.id === parseInt(form.department_id));
-      setAgents([...agents, { ...agent, department_name: dept?.name, department_icon: dept?.icon }]);
       setShowForm(false);
       setForm({ name: '', role: '', department_id: '', system_prompt: '', model: 'gpt-4' });
-    } catch (err) { alert(err.message); }
+      loadData();
+      toast.success('Agent created');
+    } catch (err) { toast.error(err.message); }
   };
 
   const toggleStatus = async (agent) => {
     const newStatus = agent.status === 'active' ? 'paused' : 'active';
     await api.updateAgent(agent.id, { status: newStatus });
     setAgents(agents.map(a => a.id === agent.id ? { ...a, status: newStatus } : a));
+    toast.success(`${agent.name} ${newStatus === 'active' ? 'activated' : 'paused'}`);
   };
 
   const deleteAgent = async (id) => {
     if (!confirm('Delete this agent?')) return;
     await api.deleteAgent(id);
     setAgents(agents.filter(a => a.id !== id));
+    toast.success('Agent deleted');
   };
 
   const statusIcon = (s) => s === 'active' ? '🟢' : s === 'paused' ? '🟡' : '🔴';
@@ -93,14 +103,15 @@ export default function AgentsPage() {
           </div>
         ) : (
           agents.map(a => (
-            <div key={a.id} className="card">
+            <div key={a.id} className="card" style={{ cursor: user?.role === 'admin' ? 'pointer' : 'default' }}
+              onClick={() => user?.role === 'admin' && setEditingAgent(a)}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                 <div>
                   <h3 style={{ fontSize: '1rem', fontWeight: 600 }}>{statusIcon(a.status)} {a.name}</h3>
                   <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{a.role}</p>
                 </div>
                 {user?.role === 'admin' && (
-                  <div style={{ display: 'flex', gap: '4px' }}>
+                  <div style={{ display: 'flex', gap: '4px' }} onClick={e => e.stopPropagation()}>
                     <button onClick={() => toggleStatus(a)} className="btn btn-ghost" style={{ padding: '2px 8px', fontSize: '0.75rem' }}>
                       {a.status === 'active' ? 'Pause' : 'Activate'}
                     </button>
@@ -120,10 +131,22 @@ export default function AgentsPage() {
                   {a.system_prompt}
                 </div>
               )}
+              {user?.role === 'admin' && (
+                <p style={{ fontSize: '0.7rem', color: '#6366f1', marginTop: '8px' }}>Click to edit →</p>
+              )}
             </div>
           ))
         )}
       </div>
+
+      {editingAgent && (
+        <AgentEditModal
+          agent={editingAgent}
+          departments={departments}
+          onClose={() => setEditingAgent(null)}
+          onSaved={() => { loadData(); toast.success('Agent updated'); }}
+        />
+      )}
     </div>
   );
 }

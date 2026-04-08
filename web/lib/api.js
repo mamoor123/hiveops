@@ -19,9 +19,51 @@ export const api = {
   register: (data) => request('/api/auth/register', { method: 'POST', body: JSON.stringify(data) }),
   me: () => request('/api/auth/me'),
   getUsers: () => request('/api/auth'),
+  updateProfile: (data) => request('/api/auth/profile', { method: 'PUT', body: JSON.stringify(data) }),
+  changePassword: (data) => request('/api/auth/change-password', { method: 'POST', body: JSON.stringify(data) }),
+  updateUserRole: (id, role) => request(`/api/auth/${id}/role`, { method: 'PUT', body: JSON.stringify({ role }) }),
+
+  // Uploads
+  uploadFile: async (file, taskId = null) => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+    const formData = new FormData();
+    formData.append('file', file);
+    if (taskId) formData.append('task_id', taskId);
+
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+    const res = await fetch(`${API_URL}/api/uploads`, {
+      method: 'POST',
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Upload failed' }));
+      throw new Error(err.error || 'Upload failed');
+    }
+    return res.json();
+  },
+  getTaskUploads: (taskId) => request(`/api/uploads/task/${taskId}`),
+  deleteUpload: (id) => request(`/api/uploads/${id}`, { method: 'DELETE' }),
+  getUploadUrl: (id) => {
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
+    return `${API_URL}/api/uploads/${id}/download?token=${token}`;
+  },
+
+  // System (admin)
+  getSystemStatus: () => request('/api/system/status'),
+  testLLM: (data) => request('/api/system/test-llm', { method: 'POST', body: JSON.stringify(data || {}) }),
+  toggleExecutionLoop: () => request('/api/system/execution-loop/toggle', { method: 'POST' }),
+  runExecutionLoop: () => request('/api/system/execution-loop/run', { method: 'POST' }),
+  getSchedules: () => request('/api/system/schedules'),
+  createSchedule: (data) => request('/api/system/schedules', { method: 'POST', body: JSON.stringify(data) }),
+  updateSchedule: (id, data) => request(`/api/system/schedules/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteSchedule: (id) => request(`/api/system/schedules/${id}`, { method: 'DELETE' }),
+  toggleSchedule: (id) => request(`/api/system/schedules/${id}/toggle`, { method: 'POST' }),
 
   // Dashboard
   getDashboard: () => request('/api/dashboard'),
+  getActivity: (days = 7) => request(`/api/dashboard/activity?days=${days}`),
 
   // Departments
   getDepartments: () => request('/api/departments'),
@@ -30,7 +72,17 @@ export const api = {
   updateDepartment: (id, data) => request(`/api/departments/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteDepartment: (id) => request(`/api/departments/${id}`, { method: 'DELETE' }),
 
+  // Notifications
+  getNotifications: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/api/notifications${qs ? `?${qs}` : ''}`);
+  },
+  getUnreadCount: () => request('/api/notifications/unread-count'),
+  markNotificationRead: (id) => request(`/api/notifications/${id}/read`, { method: 'POST' }),
+  markAllNotificationsRead: () => request('/api/notifications/read-all', { method: 'POST' }),
+
   // Tasks
+  getTask: (id) => request(`/api/tasks/${id}`),
   getTasks: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return request(`/api/tasks${qs ? `?${qs}` : ''}`);

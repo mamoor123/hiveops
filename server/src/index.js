@@ -7,18 +7,19 @@ const jwt = require('jsonwebtoken');
 const db = require('./config/db');
 const { JWT_SECRET } = require('./middleware/auth');
 const { chatWithAgent } = require('./services/ai-engine');
+const notificationService = require('./services/notifications');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: '*', methods: ['GET', 'POST'] }
+  cors: { origin: process.env.CORS_ORIGIN || 'http://localhost:3000', methods: ['GET', 'POST'] }
 });
 
 const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors());
+app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:3000' }));
 app.use(express.json());
 
 // Routes
@@ -31,10 +32,22 @@ app.use('/api/ai', require('./routes/ai'));
 app.use('/api/knowledge', require('./routes/knowledge'));
 app.use('/api/email', require('./routes/email'));
 app.use('/api/workflows', require('./routes/workflows'));
+app.use('/api/notifications', require('./routes/notifications'));
+app.use('/api/uploads', require('./routes/uploads'));
+app.use('/api/system', require('./routes/system'));
 
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err.message);
+  if (process.env.NODE_ENV === 'development') {
+    console.error(err.stack);
+  }
+  res.status(500).json({ error: 'Internal server error' });
 });
 
 // Socket.IO for real-time chat
@@ -51,6 +64,9 @@ io.use((socket, next) => {
 
 io.on('connection', (socket) => {
   console.log(`⚡ User connected: ${socket.user.name}`);
+
+  // Join user's personal room for notifications
+  socket.join(`user:${socket.user.id}`);
 
   socket.on('join-channel', (channel) => {
     socket.join(channel);
@@ -156,11 +172,24 @@ function seedDefaults() {
 
 seedDefaults();
 
+// Initialize notification service with Socket.IO
+notificationService.setIO(io);
+
+// Start background services
+const executionLoop = require('./services/execution-loop');
+const scheduler = require('./services/scheduler');
+
 server.listen(PORT, () => {
   console.log(`
   ╔══════════════════════════════════════╗
-  ║     🏢 Company OS Server v0.1.0     ║
+  ║     🏢 Company OS Server v0.2.0     ║
   ║     Running on port ${PORT}            ║
   ╚══════════════════════════════════════╝
   `);
+
+  // Start agent execution loop
+  executionLoop.start();
+
+  // Start cron scheduler
+  scheduler.start();
 });

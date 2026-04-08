@@ -7,9 +7,13 @@ services:
       - "3001:3001"
     environment:
       - NODE_ENV=production
-      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - JWT_SECRET=${JWT_SECRET:?Set JWT_SECRET in .env before running}
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:3000}
       - DB_PATH=/data/company-os.db
       - PORT=3001
+      - LLM_API_URL=${LLM_API_URL:-https://api.openai.com/v1/chat/completions}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-gpt-4}
     volumes:
       - db-data:/data
     restart: unless-stopped

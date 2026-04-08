@@ -1,190 +1,161 @@
 /**
- * Email Service
- * 
- * Connects to email providers via IMAP/SMTP or API.
- * Supports reading, composing, and automated responses.
+ * Email Service (SQLite-backed)
+ *
+ * Stores emails in SQLite with demo seed data.
+ * Supports reading, composing, starring, folder management, and AI draft replies.
  */
 
 const db = require('../config/db');
 
-// In-memory email store (replace with real IMAP/API in production)
-let emailStore = [];
-let emailIdCounter = 1;
-
 /**
- * Initialize with demo emails
+ * Seed demo emails if table is empty
  */
 function seedEmails() {
-  if (emailStore.length > 0) return;
+  const count = db.prepare('SELECT COUNT(*) as c FROM emails').get().c;
+  if (count > 0) return;
 
   const demoEmails = [
     {
-      id: emailIdCounter++, from: 'client@acmecorp.com', to: 'sales@company.com',
-      subject: 'Q2 Partnership Proposal', body: 'Hi team,\n\nWe\'d like to discuss a potential partnership for Q2. Our marketing team has identified significant synergy between our products.\n\nCan we schedule a call this week?\n\nBest regards,\nSarah Chen\nVP Partnerships, Acme Corp',
-      folder: 'inbox', read: false, starred: true, date: new Date(Date.now() - 3600000).toISOString(), labels: ['sales', 'urgent']
+      from_addr: 'client@acmecorp.com', to_addr: 'sales@company.com',
+      subject: 'Q2 Partnership Proposal',
+      body: 'Hi team,\n\nWe\'d like to discuss a potential partnership for Q2. Our marketing team has identified significant synergy between our products.\n\nCan we schedule a call this week?\n\nBest regards,\nSarah Chen\nVP Partnerships, Acme Corp',
+      folder: 'inbox', read: 0, starred: 1,
+      labels: JSON.stringify(['sales', 'urgent']),
+      date: new Date(Date.now() - 3600000).toISOString(),
     },
     {
-      id: emailIdCounter++, from: 'support@vendor.io', to: 'admin@company.com',
-      subject: 'Your API key has been renewed', body: 'Hello,\n\nYour API key for vendor.io has been automatically renewed. The new key is valid until December 2026.\n\nNo action required.',
-      folder: 'inbox', read: true, starred: false, date: new Date(Date.now() - 7200000).toISOString(), labels: ['system']
+      from_addr: 'support@vendor.io', to_addr: 'admin@company.com',
+      subject: 'Your API key has been renewed',
+      body: 'Hello,\n\nYour API key for vendor.io has been automatically renewed. The new key is valid until December 2026.\n\nNo action required.',
+      folder: 'inbox', read: 1, starred: 0,
+      labels: JSON.stringify(['system']),
+      date: new Date(Date.now() - 7200000).toISOString(),
     },
     {
-      id: emailIdCounter++, from: 'newsletter@industry.com', to: 'marketing@company.com',
-      subject: 'Weekly Industry Digest - AI Trends', body: 'This week in AI:\n\n1. New LLM benchmarks released\n2. Enterprise adoption up 40%\n3. Regulatory updates from EU\n4. Open source model releases\n\nRead more at industry.com',
-      folder: 'inbox', read: false, starred: false, date: new Date(Date.now() - 10800000).toISOString(), labels: ['newsletter']
+      from_addr: 'newsletter@industry.com', to_addr: 'marketing@company.com',
+      subject: 'Weekly Industry Digest - AI Trends',
+      body: 'This week in AI:\n\n1. New LLM benchmarks released\n2. Enterprise adoption up 40%\n3. Regulatory updates from EU\n4. Open source model releases\n\nRead more at industry.com',
+      folder: 'inbox', read: 0, starred: 0,
+      labels: JSON.stringify(['newsletter']),
+      date: new Date(Date.now() - 10800000).toISOString(),
     },
     {
-      id: emailIdCounter++, from: 'hr@company.com', to: 'team@company.com',
-      subject: 'Team Building Event - April 15th', body: 'Hi everyone!\n\nWe\'re organizing a team building event on April 15th at 3pm. Activities include escape room and dinner.\n\nPlease RSVP by April 10th.\n\nHR Team',
-      folder: 'inbox', read: true, starred: false, date: new Date(Date.now() - 86400000).toISOString(), labels: ['hr']
+      from_addr: 'hr@company.com', to_addr: 'team@company.com',
+      subject: 'Team Building Event - April 15th',
+      body: 'Hi everyone!\n\nWe\'re organizing a team building event on April 15th at 3pm. Activities include escape room and dinner.\n\nPlease RSVP by April 10th.\n\nHR Team',
+      folder: 'inbox', read: 1, starred: 0,
+      labels: JSON.stringify(['hr']),
+      date: new Date(Date.now() - 86400000).toISOString(),
     },
     {
-      id: emailIdCounter++, from: 'devops@company.com', to: 'engineering@company.com',
-      subject: 'Server Maintenance - Tonight 2am', body: 'Heads up team,\n\nWe\'ll be performing scheduled maintenance on the production servers tonight from 2am to 4am UTC.\n\nExpected downtime: ~30 minutes\n\nDevOps',
-      folder: 'inbox', read: false, starred: true, date: new Date(Date.now() - 172800000).toISOString(), labels: ['engineering', 'ops']
+      from_addr: 'devops@company.com', to_addr: 'engineering@company.com',
+      subject: 'Server Maintenance - Tonight 2am',
+      body: 'Heads up team,\n\nWe\'ll be performing scheduled maintenance on the production servers tonight from 2am to 4am UTC.\n\nExpected downtime: ~30 minutes\n\nDevOps',
+      folder: 'inbox', read: 0, starred: 1,
+      labels: JSON.stringify(['engineering', 'ops']),
+      date: new Date(Date.now() - 172800000).toISOString(),
     },
   ];
 
-  emailStore = demoEmails;
+  const insert = db.prepare(`
+    INSERT INTO emails (from_addr, to_addr, subject, body, folder, read, starred, labels, date)
+    VALUES (@from_addr, @to_addr, @subject, @body, @folder, @read, @starred, @labels, @date)
+  `);
+
+  for (const email of demoEmails) {
+    insert.run(email);
+  }
+  console.log('✅ Seeded demo emails');
 }
 
 seedEmails();
 
-/**
- * Get emails by folder
- */
-function getEmails(folder = 'inbox', options = {}) {
-  let results = emailStore.filter(e => e.folder === folder);
+function rowToEmail(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    from: row.from_addr,
+    to: row.to_addr,
+    read: !!row.read,
+    starred: !!row.starred,
+    labels: JSON.parse(row.labels || '[]'),
+  };
+}
 
-  if (options.unreadOnly) results = results.filter(e => !e.read);
-  if (options.starred) results = results.filter(e => e.starred);
-  if (options.label) results = results.filter(e => e.labels.includes(options.label));
+function getEmails(folder = 'inbox', options = {}) {
+  let query = 'SELECT * FROM emails WHERE folder = ?';
+  const params = [folder];
+
+  if (options.unreadOnly) { query += ' AND read = 0'; }
+  if (options.starred) { query += ' AND starred = 1'; }
+  if (options.label) { query += ' AND labels LIKE ?'; params.push(`%"${options.label}"%`); }
   if (options.search) {
-    const q = options.search.toLowerCase();
-    results = results.filter(e =>
-      e.subject.toLowerCase().includes(q) ||
-      e.body.toLowerCase().includes(q) ||
-      e.from.toLowerCase().includes(q)
-    );
+    query += ' AND (subject LIKE ? OR body LIKE ? OR from_addr LIKE ?)';
+    const q = `%${options.search}%`;
+    params.push(q, q, q);
   }
 
-  results.sort((a, b) => new Date(b.date) - new Date(a.date));
-  return results;
+  query += ' ORDER BY date DESC';
+  return db.prepare(query).all(...params).map(rowToEmail);
 }
 
-/**
- * Get single email
- */
 function getEmail(id) {
-  return emailStore.find(e => e.id === parseInt(id));
+  return rowToEmail(db.prepare('SELECT * FROM emails WHERE id = ?').get(id));
 }
 
-/**
- * Mark as read
- */
 function markRead(id) {
-  const email = emailStore.find(e => e.id === parseInt(id));
-  if (email) email.read = true;
-  return email;
+  db.prepare('UPDATE emails SET read = 1 WHERE id = ?').run(id);
+  return getEmail(id);
 }
 
-/**
- * Toggle star
- */
 function toggleStar(id) {
-  const email = emailStore.find(e => e.id === parseInt(id));
-  if (email) email.starred = !email.starred;
-  return email;
+  db.prepare('UPDATE emails SET starred = NOT starred WHERE id = ?').run(id);
+  return getEmail(id);
 }
 
-/**
- * Move to folder
- */
 function moveToFolder(id, folder) {
-  const email = emailStore.find(e => e.id === parseInt(id));
-  if (email) email.folder = folder;
-  return email;
+  db.prepare('UPDATE emails SET folder = ? WHERE id = ?').run(folder, id);
+  return getEmail(id);
 }
 
-/**
- * Send email (simulated)
- */
-function sendEmail({ from, to, subject, body, inReplyTo }) {
-  const email = {
-    id: emailIdCounter++,
-    from: from || 'admin@company.com',
-    to,
-    subject: inReplyTo ? `Re: ${subject}` : subject,
-    body,
-    folder: 'sent',
-    read: true,
-    starred: false,
-    date: new Date().toISOString(),
-    labels: [],
-    inReplyTo: inReplyTo || null,
-  };
-  emailStore.push(email);
-  return email;
+function sendEmail({ to, subject, body, inReplyTo, userId }) {
+  const result = db.prepare(`
+    INSERT INTO emails (from_addr, to_addr, subject, body, folder, read, starred, in_reply_to, user_id)
+    VALUES (?, ?, ?, ?, 'sent', 1, 0, ?, ?)
+  `).run('admin@company.com', to, subject, body || '', inReplyTo || null, userId || null);
+  return getEmail(result.lastInsertRowid);
 }
 
-/**
- * Draft email
- */
-function saveDraft({ from, to, subject, body }) {
-  const email = {
-    id: emailIdCounter++,
-    from: from || 'admin@company.com',
-    to: to || '',
-    subject: subject || '(no subject)',
-    body: body || '',
-    folder: 'drafts',
-    read: true,
-    starred: false,
-    date: new Date().toISOString(),
-    labels: [],
-  };
-  emailStore.push(email);
-  return email;
+function saveDraft({ to, subject, body, userId }) {
+  const result = db.prepare(`
+    INSERT INTO emails (from_addr, to_addr, subject, body, folder, read, starred, user_id)
+    VALUES (?, ?, ?, ?, 'drafts', 1, 0, ?)
+  `).run('admin@company.com', to || '', subject || '(no subject)', body || '', userId || null);
+  return getEmail(result.lastInsertRowid);
 }
 
-/**
- * Get stats
- */
 function getEmailStats() {
   return {
-    inbox: emailStore.filter(e => e.folder === 'inbox').length,
-    unread: emailStore.filter(e => e.folder === 'inbox' && !e.read).length,
-    sent: emailStore.filter(e => e.folder === 'sent').length,
-    drafts: emailStore.filter(e => e.folder === 'drafts').length,
-    starred: emailStore.filter(e => e.starred).length,
+    inbox: db.prepare("SELECT COUNT(*) as c FROM emails WHERE folder = 'inbox'").get().c,
+    unread: db.prepare("SELECT COUNT(*) as c FROM emails WHERE folder = 'inbox' AND read = 0").get().c,
+    sent: db.prepare("SELECT COUNT(*) as c FROM emails WHERE folder = 'sent'").get().c,
+    drafts: db.prepare("SELECT COUNT(*) as c FROM emails WHERE folder = 'drafts'").get().c,
+    starred: db.prepare("SELECT COUNT(*) as c FROM emails WHERE starred = 1").get().c,
   };
 }
 
-/**
- * Generate AI draft reply
- */
 async function generateReply(emailId, instructions = '') {
   const email = getEmail(emailId);
   if (!email) throw new Error('Email not found');
 
-  const prompt = `You are an email assistant. Draft a professional reply to this email.
-
-From: ${email.from}
-Subject: ${email.subject}
-Body: ${email.body}
-
-${instructions ? `Additional instructions: ${instructions}` : 'Write a helpful, professional reply.'}
-
-Reply:`;
-
-  // Simulated AI response
+  // Simulated AI response (connect to real LLM via ai-engine when configured)
   return `Hi,
 
 Thank you for your email regarding "${email.subject}".
 
 I've reviewed your message and would be happy to discuss this further. Let me check with the team and get back to you with a detailed response by end of day.
 
-Please let me know if you need anything else in the meantime.
+${instructions ? `Note: ${instructions}\n\n` : ''}Please let me know if you need anything else in the meantime.
 
 Best regards,
 Company OS Assistant`;

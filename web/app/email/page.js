@@ -1,12 +1,14 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../lib/auth';
+import { useToast } from '../../components/Toast';
 import { api } from '../../lib/api';
 import { useRouter } from 'next/navigation';
 
 export default function EmailPage() {
   const { user } = useAuth();
   const router = useRouter();
+  const toast = useToast();
   const [folder, setFolder] = useState('inbox');
   const [emails, setEmails] = useState([]);
   const [selectedEmail, setSelectedEmail] = useState(null);
@@ -43,11 +45,13 @@ export default function EmailPage() {
   };
 
   const handleSend = async () => {
-    if (!compose.to || !compose.subject) { alert('To and Subject required'); return; }
+    if (!compose.to || !compose.subject) { toast.error('To and Subject required'); return; }
     await api.sendEmail(compose);
     setShowCompose(false);
     setCompose({ to: '', subject: '', body: '' });
-    alert('Email sent!');
+    toast.success('Email sent!');
+    loadEmails();
+    api.getEmailStats().then(setStats).catch(() => {});
   };
 
   const handleAiReply = async () => {

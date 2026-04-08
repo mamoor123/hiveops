@@ -1,12 +1,14 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../lib/auth';
+import { useToast } from '../../components/Toast';
 import { api } from '../../lib/api';
 import { useRouter } from 'next/navigation';
 
 export default function WorkflowsPage() {
   const { user } = useAuth();
   const router = useRouter();
+  const toast = useToast();
   const [workflows, setWorkflows] = useState([]);
   const [log, setLog] = useState([]);
   const [stats, setStats] = useState({});
@@ -36,16 +38,18 @@ export default function WorkflowsPage() {
   const handleToggle = async (id) => {
     await api.toggleWorkflow(id);
     loadData();
+    toast.success('Workflow toggled');
   };
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this workflow?')) return;
     await api.deleteWorkflow(id);
     loadData();
+    toast.success('Workflow deleted');
   };
 
   const handleCreate = async () => {
-    if (!form.name) { alert('Name required'); return; }
+    if (!form.name) { toast.error('Name required'); return; }
     await api.createWorkflow(form);
     setShowForm(false);
     setForm({
@@ -54,6 +58,7 @@ export default function WorkflowsPage() {
       actions: [{ type: 'notify', target: 'admin', message: '' }],
     });
     loadData();
+    toast.success('Workflow created');
   };
 
   const addCondition = () => {

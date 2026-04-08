@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../config/db');
 const { authMiddleware, adminOnly } = require('../middleware/auth');
+const { validateBody, sanitizeBody } = require('../middleware/validate');
 
 const router = express.Router();
 
@@ -16,11 +17,8 @@ router.get('/', authMiddleware, (req, res) => {
 });
 
 // Create agent
-router.post('/', authMiddleware, adminOnly, (req, res) => {
+router.post('/', authMiddleware, adminOnly, sanitizeBody(['name', 'role']), validateBody(['name', 'role', 'department_id']), (req, res) => {
   const { name, role, department_id, system_prompt, model, capabilities } = req.body;
-  if (!name || !role || !department_id) {
-    return res.status(400).json({ error: 'Name, role, and department are required' });
-  }
 
   const result = db.prepare(`
     INSERT INTO agents (name, role, department_id, system_prompt, model, capabilities)

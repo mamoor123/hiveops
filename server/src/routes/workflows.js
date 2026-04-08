@@ -24,7 +24,7 @@ router.get('/log', authMiddleware, (req, res) => {
 router.post('/', authMiddleware, adminOnly, (req, res) => {
   const { name, trigger } = req.body;
   if (!name || !trigger) return res.status(400).json({ error: 'Name and trigger required' });
-  const wf = workflowService.createWorkflow(req.body);
+  const wf = workflowService.createWorkflow(req.body, req.user.id);
   res.status(201).json(wf);
 });
 
