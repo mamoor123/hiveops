@@ -1,3 +1,9 @@
+/**
+ * Copyright (c) 2026 mamoor123
+ * Licensed under the GNU Affero General Public License v3.0
+ * See LICENSE for details.
+ */
+
 const db = require('../config/db');
 const notificationService = require('./notifications');
 

@@ -1,0 +1,21 @@
+# CLA Assistant Configuration
+# https://cla-assistant.io/
+
+# Path to your CLA file (can be a URL or a file in the repo)
+custom_field_definitions:
+  - name: "name"
+    type: "text"
+    required: true
+    description: "Your full name"
+  - name: "email"
+    type: "text"
+    required: true
+    description: "Your email address"
+  - name: "github_username"
+    type: "text"
+    required: true
+    description: "Your GitHub username"
+
+# Minimum number of commits before CLA is required
+# Set to 1 to require CLA for all contributions
+min_file_changes: 0

@@ -1,4 +1,10 @@
 /**
+ * Copyright (c) 2026 mamoor123
+ * Licensed under the GNU Affero General Public License v3.0
+ * See LICENSE for details.
+ */
+
+/**
  * Simple in-memory rate limiter for auth endpoints.
  */
 

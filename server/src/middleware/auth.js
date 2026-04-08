@@ -1,3 +1,9 @@
+/**
+ * Copyright (c) 2026 mamoor123
+ * Licensed under the GNU Affero General Public License v3.0
+ * See LICENSE for details.
+ */
+
 const jwt = require('jsonwebtoken');
 
 const JWT_SECRET = process.env.JWT_SECRET;

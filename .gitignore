@@ -1,5 +1,40 @@
+# Dependencies
 node_modules/
+
+# Database
 data/
 *.db
+*.sqlite
+
+# Environment
 .env
+.env.local
+.env.production
+
+# Next.js
 .next/
+out/
+
+# Build
+dist/
+build/
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Pro features (closed source - do not include in public repo)
+hiveops-pro/
+
+# Docker
+docker-compose.override.yml

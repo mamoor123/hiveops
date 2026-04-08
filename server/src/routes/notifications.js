@@ -1,3 +1,9 @@
+/**
+ * Copyright (c) 2026 mamoor123
+ * Licensed under the GNU Affero General Public License v3.0
+ * See LICENSE for details.
+ */
+
 const express = require('express');
 const { authMiddleware } = require('../middleware/auth');
 const notificationService = require('../services/notifications');

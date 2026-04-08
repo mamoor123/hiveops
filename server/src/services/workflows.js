@@ -1,3 +1,9 @@
+/**
+ * Copyright (c) 2026 mamoor123
+ * Licensed under the GNU Affero General Public License v3.0
+ * See LICENSE for details.
+ */
+
 const db = require('../config/db');
 
 // Seed on load — use try/catch since PG may not have tables yet at module load time

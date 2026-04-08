@@ -375,6 +375,26 @@ cd server && npm test
 ```
 
 All contributions welcome — features, bug fixes, docs, ideas.
+Before contributing, please read [CONTRIBUTING.md](CONTRIBUTING.md) which includes our CLA.
+
+---
+
+## 📜 License
+
+HiveOps is licensed under the **[GNU Affero General Public License v3.0](LICENSE)** (AGPL-3.0).
+
+- ✅ Free to use, modify, and self-host
+- ✅ Free for personal and commercial use
+- ⚠️ If you modify and host it publicly, you must share your changes under AGPL-3.0
+- ⚠️ You may not offer HiveOps as a closed-source hosted service
+
+For commercial licensing or HiveOps Pro (enterprise features), contact us.
+
+## ™️ Trademark
+
+"HiveOps" and the HiveOps logo are trademarks of mamoor123. The AGPL-3.0 license grants
+you the right to use and modify the code, but does not grant trademark rights. You may
+not use the "HiveOps" name or logo for derivative works without written permission.
 
 ---
 

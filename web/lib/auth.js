@@ -1,3 +1,9 @@
+/**
+ * Copyright (c) 2026 mamoor123
+ * Licensed under the GNU Affero General Public License v3.0
+ * See LICENSE for details.
+ */
+
 'use client';
 import { createContext, useContext, useState, useEffect } from 'react';
 import { api } from './api';

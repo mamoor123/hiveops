@@ -1,4 +1,10 @@
 /**
+ * Copyright (c) 2026 mamoor123
+ * Licensed under the GNU Affero General Public License v3.0
+ * See LICENSE for details.
+ */
+
+/**
  * Email Service (SQLite-backed)
  *
  * Stores emails in SQLite with demo seed data.
