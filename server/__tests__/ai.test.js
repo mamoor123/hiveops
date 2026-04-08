@@ -14,7 +14,7 @@ beforeAll(async () => {
   const agent = await db.prepare("INSERT INTO agents (name, role, department_id, system_prompt, model, status) VALUES ('TestBot', 'Assistant', ?, 'You are a helpful assistant.', 'gpt-4', 'active')").run(departmentId);
   agentId = agent.lastInsertRowid;
 });
-afterAll(() => { cleanup(); });
+afterAll(async () => { await cleanup(); });
 
 describe('AI Agent Chat', () => {
   test('chats with agent (simulated)', async () => {

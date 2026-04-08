@@ -4,7 +4,7 @@ const { createTestApp, createTestUser, createAdminUser, cleanup } = require('./h
 let app;
 
 beforeAll(() => { app = createTestApp(); });
-afterAll(() => { cleanup(); });
+afterAll(async () => { await cleanup(); });
 
 describe('POST /api/auth/register', () => {
   test('registers a new user', async () => {

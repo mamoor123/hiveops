@@ -5,9 +5,9 @@ const emailService = require('../services/email-real');
 const router = express.Router();
 
 // Get emails by folder
-router.get('/:folder', authMiddleware, (req, res) => {
+router.get('/:folder', authMiddleware, async (req, res) => {
   const { unread, starred, label, search } = req.query;
-  const emails = emailService.getEmails(req.params.folder, {
+  const emails = await emailService.getEmails(req.params.folder, {
     unreadOnly: unread === 'true',
     starred: starred === 'true',
     label,
@@ -17,8 +17,8 @@ router.get('/:folder', authMiddleware, (req, res) => {
 });
 
 // Get stats
-router.get('/meta/stats', authMiddleware, (req, res) => {
-  res.json(emailService.getEmailStats());
+router.get('/meta/stats', authMiddleware, async (req, res) => {
+  res.json(await emailService.getEmailStats());
 });
 
 // Get email health
@@ -27,29 +27,29 @@ router.get('/meta/health', authMiddleware, (req, res) => {
 });
 
 // Get single email
-router.get('/item/:id', authMiddleware, (req, res) => {
-  const email = emailService.getEmail(req.params.id);
+router.get('/item/:id', authMiddleware, async (req, res) => {
+  const email = await emailService.getEmail(req.params.id);
   if (!email) return res.status(404).json({ error: 'Email not found' });
-  emailService.markRead(req.params.id);
+  await emailService.markRead(req.params.id);
   res.json(email);
 });
 
 // Mark as read
-router.post('/:id/read', authMiddleware, (req, res) => {
-  const email = emailService.markRead(req.params.id);
+router.post('/:id/read', authMiddleware, async (req, res) => {
+  const email = await emailService.markRead(req.params.id);
   res.json(email);
 });
 
 // Toggle star
-router.post('/:id/star', authMiddleware, (req, res) => {
-  const email = emailService.toggleStar(req.params.id);
+router.post('/:id/star', authMiddleware, async (req, res) => {
+  const email = await emailService.toggleStar(req.params.id);
   res.json(email);
 });
 
 // Move to folder
-router.post('/:id/move', authMiddleware, (req, res) => {
+router.post('/:id/move', authMiddleware, async (req, res) => {
   const { folder } = req.body;
-  const email = emailService.moveToFolder(req.params.id, folder);
+  const email = await emailService.moveToFolder(req.params.id, folder);
   res.json(email);
 });
 
@@ -66,8 +66,8 @@ router.post('/send', authMiddleware, async (req, res) => {
 });
 
 // Save draft
-router.post('/draft', authMiddleware, (req, res) => {
-  const draft = emailService.saveDraft(req.body);
+router.post('/draft', authMiddleware, async (req, res) => {
+  const draft = await emailService.saveDraft(req.body);
   res.status(201).json(draft);
 });
 

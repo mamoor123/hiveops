@@ -11,7 +11,7 @@ beforeAll(async () => {
   admin = await createAdminUser();
   member = await createTestUser();
 });
-afterAll(() => { cleanup(); });
+afterAll(async () => { await cleanup(); });
 
 describe('Department CRUD', () => {
   let deptId;

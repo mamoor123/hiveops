@@ -80,7 +80,8 @@ async function createAdminUser() {
 }
 
 async function seedDefaults() {
-  const deptCount = (await db.prepare('SELECT COUNT(*) as count FROM departments').get()).count;
+  const deptRow = await db.prepare('SELECT COUNT(*) as count FROM departments').get();
+  const deptCount = deptRow ? (deptRow.count || deptRow.c || 0) : 0;
   if (Number(deptCount) === 0) {
     const defaults = [
       { name: 'Operations', description: 'Day-to-day business operations', icon: '⚙️', color: '#6366f1' },

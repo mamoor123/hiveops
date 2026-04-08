@@ -19,7 +19,7 @@ function stop() {
 async function checkSchedules() {
   const now = new Date().toISOString();
   let schedules;
-  try { schedules = await db.prepare('SELECT * FROM scheduled_tasks WHERE enabled = 1 AND (next_run IS NULL OR next_run <= ?)').all(now); } catch (err) { if (err.message.includes('no such table')) return; throw err; }
+  try { schedules = await db.prepare('SELECT * FROM scheduled_tasks WHERE enabled = true AND (next_run IS NULL OR next_run <= ?)').all(now); } catch (err) { if (err.message.includes('no such table')) return; throw err; }
   for (const schedule of schedules) {
     try { await executeSchedule(schedule); } catch (err) { console.error(`⏰ Schedule "${schedule.name}" failed:`, err.message); }
     const nextRun = calculateNextRun(schedule);
@@ -44,14 +44,14 @@ function calculateNextRun(schedule) {
   }
 }
 
-function createSchedule(data) {
+async function createSchedule(data) {
   const nextRun = calculateNextRun(data);
-  const result = db.prepare('INSERT INTO scheduled_tasks (name, description, type, time, day_of_week, interval_minutes, agent_id, department_id, priority, next_run) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(data.name, data.description || '', data.type || 'daily', data.time || '09:00', data.dayOfWeek ?? data.day_of_week ?? null, data.intervalMinutes ?? data.interval_minutes ?? null, data.agent_id || null, data.department_id || null, data.priority || 'medium', nextRun);
-  return db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(result.lastInsertRowid);
+  const result = await db.prepare('INSERT INTO scheduled_tasks (name, description, type, time, day_of_week, interval_minutes, agent_id, department_id, priority, next_run) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(data.name, data.description || '', data.type || 'daily', data.time || '09:00', data.dayOfWeek ?? data.day_of_week ?? null, data.intervalMinutes ?? data.interval_minutes ?? null, data.agent_id || null, data.department_id || null, data.priority || 'medium', nextRun);
+  return await db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(result.lastInsertRowid);
 }
 
-function updateSchedule(id, data) {
-  const existing = db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id);
+async function updateSchedule(id, data) {
+  const existing = await db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id);
   if (!existing) return null;
   const updates = [];
   const params = [];
@@ -61,26 +61,31 @@ function updateSchedule(id, data) {
   if (data.type || data.time || data.dayOfWeek || data.day_of_week || data.intervalMinutes || data.interval_minutes) { updates.push('next_run = ?'); params.push(calculateNextRun({ ...existing, ...data })); }
   updates.push('updated_at = CURRENT_TIMESTAMP');
   params.push(id);
-  db.prepare(`UPDATE scheduled_tasks SET ${updates.join(', ')} WHERE id = ?`).run(...params);
-  return db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id);
+  await db.prepare(`UPDATE scheduled_tasks SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+  return await db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id);
 }
 
-function deleteSchedule(id) { db.prepare('DELETE FROM scheduled_tasks WHERE id = ?').run(id); return true; }
+async function deleteSchedule(id) { await db.prepare('DELETE FROM scheduled_tasks WHERE id = ?').run(id); return true; }
 
-function toggleSchedule(id) {
-  const schedule = db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id);
+async function toggleSchedule(id) {
+  const schedule = await db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id);
   if (!schedule) return null;
-  const newEnabled = schedule.enabled ? 0 : 1;
+  const newEnabled = !schedule.enabled;
   const nextRun = newEnabled ? calculateNextRun(schedule) : null;
-  db.prepare('UPDATE scheduled_tasks SET enabled = ?, next_run = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newEnabled, nextRun, id);
-  return db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id);
+  await db.prepare('UPDATE scheduled_tasks SET enabled = ?, next_run = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newEnabled, nextRun, id);
+  return await db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id);
 }
 
-function getSchedules() { try { return db.prepare('SELECT * FROM scheduled_tasks ORDER BY created_at DESC').all(); } catch (err) { if (err.message.includes('no such table')) return []; throw err; } }
+async function getSchedules() { try { return await db.prepare('SELECT * FROM scheduled_tasks ORDER BY created_at DESC').all(); } catch (err) { if (err.message.includes('no such table')) return []; throw err; } }
 
-function getStatus() {
+async function getStatus() {
   let totalSchedules = 0, enabledSchedules = 0;
-  try { totalSchedules = db.prepare('SELECT COUNT(*) as c FROM scheduled_tasks').get().c; enabledSchedules = db.prepare('SELECT COUNT(*) as c FROM scheduled_tasks WHERE enabled = 1').get().c; } catch {}
+  try {
+    const totalRow = await db.prepare('SELECT COUNT(*) as c FROM scheduled_tasks').get();
+    totalSchedules = totalRow ? (totalRow.c || totalRow.count || 0) : 0;
+    const enabledRow = await db.prepare('SELECT COUNT(*) as c FROM scheduled_tasks WHERE enabled = true').get();
+    enabledSchedules = enabledRow ? (enabledRow.c || enabledRow.count || 0) : 0;
+  } catch {}
   return { running: checkInterval !== null, totalSchedules, enabledSchedules };
 }
 

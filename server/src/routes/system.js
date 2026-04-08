@@ -15,7 +15,7 @@ router.get('/status', authMiddleware, async (req, res) => {
     db: { type: db._type, healthy: dbHealthy },
     llm: { configured: !!process.env.LLM_API_KEY, url: process.env.LLM_API_URL || 'https://api.openai.com/v1/chat/completions', model: process.env.DEFAULT_MODEL || 'gpt-4' },
     executionLoop: executionLoop.getStatus(),
-    scheduler: scheduler.getStatus(),
+    scheduler: await scheduler.getStatus(),
   });
 });
 
@@ -63,30 +63,30 @@ router.post('/execution-loop/run', authMiddleware, async (req, res) => {
 // Scheduler CRUD
 router.get('/schedules', authMiddleware, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
-  res.json(scheduler.getSchedules());
+  res.json(await scheduler.getSchedules());
 });
 
 router.post('/schedules', authMiddleware, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
-  res.status(201).json(scheduler.createSchedule(req.body));
+  res.status(201).json(await scheduler.createSchedule(req.body));
 });
 
 router.put('/schedules/:id', authMiddleware, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
-  const schedule = scheduler.updateSchedule(req.params.id, req.body);
+  const schedule = await scheduler.updateSchedule(req.params.id, req.body);
   if (!schedule) return res.status(404).json({ error: 'Schedule not found' });
   res.json(schedule);
 });
 
 router.delete('/schedules/:id', authMiddleware, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
-  scheduler.deleteSchedule(req.params.id);
+  await scheduler.deleteSchedule(req.params.id);
   res.json({ success: true });
 });
 
 router.post('/schedules/:id/toggle', authMiddleware, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
-  res.json(scheduler.toggleSchedule(req.params.id));
+  res.json(await scheduler.toggleSchedule(req.params.id));
 });
 
 module.exports = router;
