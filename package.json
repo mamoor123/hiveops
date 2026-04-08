@@ -1,11 +1,14 @@
 {
   "name": "company-os",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:web\"",
     "dev:server": "cd server && npm run dev",
     "dev:web": "cd web && npm run dev",
+    "test": "cd server && npm test",
+    "test:coverage": "cd server && npm run test:coverage",
+    "migrate": "cd server && npm run migrate",
     "build": "cd web && npm run build",
     "start": "docker-compose up --build"
   },

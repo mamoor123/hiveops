@@ -9,10 +9,29 @@ const { JWT_SECRET } = require('./middleware/auth');
 const { chatWithAgent } = require('./services/ai-engine');
 const notificationService = require('./services/notifications');
 
+// ─── Run migrations on startup ───────────────────────────────────
+
+const { execSync } = require('child_process');
+const path = require('path');
+try {
+  console.log('📦 Running database migrations...');
+  execSync(`node ${path.join(__dirname, 'config/migrate.js')}`, {
+    stdio: 'inherit',
+    env: { ...process.env },
+  });
+} catch (err) {
+  console.error('❌ Migration failed:', err.message);
+  process.exit(1);
+}
+
+// ─── Express + Socket.IO setup ───────────────────────────────────
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: process.env.CORS_ORIGIN || 'http://localhost:3000', methods: ['GET', 'POST'] }
+  cors: { origin: process.env.CORS_ORIGIN || 'http://localhost:3000', methods: ['GET', 'POST'] },
+  pingTimeout: 60_000,
+  pingInterval: 25_000,
 });
 
 const PORT = process.env.PORT || 3001;
@@ -20,7 +39,21 @@ const PORT = process.env.PORT || 3001;
 // Middleware
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:3000' }));
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
+
+// Request logging (dev)
+if (process.env.NODE_ENV !== 'production') {
+  app.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+      const ms = Date.now() - start;
+      if (req.path !== '/api/health') {
+        console.log(`${req.method} ${req.path} ${res.statusCode} ${ms}ms`);
+      }
+    });
+    next();
+  });
+}
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
@@ -36,21 +69,33 @@ app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/uploads', require('./routes/uploads'));
 app.use('/api/system', require('./routes/system'));
 
-// Health check
+// Health check with DB connectivity
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', time: new Date().toISOString() });
+  try {
+    db.prepare('SELECT 1').get();
+    res.json({ status: 'ok', time: new Date().toISOString(), db: 'connected' });
+  } catch (err) {
+    res.status(503).json({ status: 'error', db: 'disconnected', error: err.message });
+  }
 });
 
 // Global error handler
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err.message);
-  if (process.env.NODE_ENV === 'development') {
+  if (process.env.NODE_ENV !== 'production') {
     console.error(err.stack);
   }
+
+  // Multer errors
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ error: 'File too large (max 10MB)' });
+  }
+
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// Socket.IO for real-time chat
+// ─── Socket.IO ───────────────────────────────────────────────────
+
 io.use((socket, next) => {
   const token = socket.handshake.auth.token;
   if (!token) return next(new Error('Authentication required'));
@@ -65,12 +110,10 @@ io.use((socket, next) => {
 io.on('connection', (socket) => {
   console.log(`⚡ User connected: ${socket.user.name}`);
 
-  // Join user's personal room for notifications
   socket.join(`user:${socket.user.id}`);
 
   socket.on('join-channel', (channel) => {
     socket.join(channel);
-    console.log(`${socket.user.name} joined #${channel}`);
   });
 
   socket.on('leave-channel', (channel) => {
@@ -92,51 +135,45 @@ io.on('connection', (socket) => {
       sender_id: socket.user.id,
       sender_name: socket.user.name,
       content,
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
     };
 
     io.to(channel).emit('message', message);
   });
 
-  // Chat with agent via socket
   socket.on('agent-message', async (data) => {
     const { channel, agentId, content } = data;
     if (!channel || !agentId || !content) return;
 
-    // Store user message
     const userMsg = db.prepare(
       "INSERT INTO messages (channel, sender_type, sender_id, content) VALUES (?, 'user', ?, ?)"
     ).run(channel, socket.user.id, content);
 
-    const userMessage = {
+    io.to(channel).emit('message', {
       id: userMsg.lastInsertRowid,
       channel,
       sender_type: 'user',
       sender_id: socket.user.id,
       sender_name: socket.user.name,
       content,
-      created_at: new Date().toISOString()
-    };
-    io.to(channel).emit('message', userMessage);
+      created_at: new Date().toISOString(),
+    });
 
-    // Emit typing indicator
     io.to(channel).emit('agent-typing', { agentId, channel });
 
     try {
-      // Get agent response
       const response = await chatWithAgent(agentId, content, channel);
-
       const agent = db.prepare('SELECT name FROM agents WHERE id = ?').get(agentId);
-      const agentMessage = {
+
+      io.to(channel).emit('message', {
         id: Date.now(),
         channel,
         sender_type: 'agent',
         sender_id: agentId,
         sender_name: agent?.name || 'Agent',
         content: response,
-        created_at: new Date().toISOString()
-      };
-      io.to(channel).emit('message', agentMessage);
+        created_at: new Date().toISOString(),
+      });
     } catch (err) {
       io.to(socket.id).emit('error', { message: err.message });
     }
@@ -149,7 +186,8 @@ io.on('connection', (socket) => {
   });
 });
 
-// Seed default data if empty
+// ─── Seed defaults ───────────────────────────────────────────────
+
 function seedDefaults() {
   const deptCount = db.prepare('SELECT COUNT(*) as count FROM departments').get().count;
   if (deptCount === 0) {
@@ -175,21 +213,76 @@ seedDefaults();
 // Initialize notification service with Socket.IO
 notificationService.setIO(io);
 
-// Start background services
+// ─── Background services ─────────────────────────────────────────
+
 const executionLoop = require('./services/execution-loop');
 const scheduler = require('./services/scheduler');
+const emailReal = require('./services/email-real');
 
 server.listen(PORT, () => {
   console.log(`
   ╔══════════════════════════════════════╗
-  ║     🏢 Company OS Server v0.2.0     ║
+  ║     🏢 Company OS Server v0.3.0     ║
   ║     Running on port ${PORT}            ║
   ╚══════════════════════════════════════╝
   `);
 
-  // Start agent execution loop
   executionLoop.start();
-
-  // Start cron scheduler
   scheduler.start();
+  emailReal.startImapPolling();
+});
+
+// ─── Graceful shutdown ───────────────────────────────────────────
+
+let isShuttingDown = false;
+
+function gracefulShutdown(signal) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
+  console.log(`\n🛑 ${signal} received, shutting down gracefully...`);
+
+  // Stop accepting new connections
+  server.close(() => {
+    console.log('  ✓ HTTP server closed');
+  });
+
+  // Stop background services
+  executionLoop.stop();
+  console.log('  ✓ Execution loop stopped');
+
+  scheduler.stop();
+  console.log('  ✓ Scheduler stopped');
+
+  emailReal.stopImapPolling();
+  console.log('  ✓ IMAP polling stopped');
+
+  // Close Socket.IO
+  io.close(() => {
+    console.log('  ✓ Socket.IO closed');
+  });
+
+  // Close database
+  try {
+    db.close();
+    console.log('  ✓ Database closed');
+  } catch (err) {
+    console.error('  ✗ Database close error:', err.message);
+  }
+
+  console.log('👋 Shutdown complete');
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection:', reason);
+  // Don't exit — log and continue
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+  gracefulShutdown('uncaughtException');
 });

@@ -4,15 +4,32 @@ AI-Powered Company Operating System — automate and manage entire business oper
 
 A fully-featured web application with real-time notifications, task management, AI agent execution, knowledge base, email, workflow automation, analytics, file uploads, and an admin system panel.
 
+## What's New in v0.3.0 (Production Hardening)
+
+- **Testing** — 68 Jest + Supertest tests across 5 test suites (auth, tasks, workflows, AI, departments/knowledge/email)
+- **Database Migrations** — Versioned migration system with performance indexes (30+ indexes), retry fields, scheduled tasks table
+- **Error Recovery** — Retry with exponential backoff, dead letter queue after max retries, task execution timeouts
+- **Graceful Shutdown** — SIGTERM/SIGINT handlers cleanly stop HTTP, Socket.IO, background services, and DB
+- **Real Email** — Nodemailer SMTP outbound + ImapFlow IMAP inbound polling, falls back to SQLite-only when unconfigured
+- **Persistent Scheduler** — Schedules stored in DB (survives restarts), no more in-memory Map
+- **DB Hardening** — WAL mode + busy_timeout + 64MB cache + memory-mapped I/O + configurable pragma
+
 ## Architecture
 
 ```
 company-os/
 ├── server/                          # Express API + Socket.IO + SQLite
+│   ├── __tests__/                   # Jest test suite
+│   │   ├── helpers/test-helper.js   # Isolated test app + DB
+│   │   ├── auth.test.js             # 14 auth tests
+│   │   ├── tasks.test.js            # 13 task tests
+│   │   ├── workflows.test.js        # 11 workflow tests
+│   │   ├── ai.test.js               # 12 AI/agent tests
+│   │   └── departments.test.js      # 18 dept/knowledge/email tests
 │   ├── src/
 │   │   ├── config/
-│   │   │   ├── db.js                # SQLite schema (12 tables)
-│   │   │   └── migrations/          # DB migrations
+│   │   │   ├── db.js                # SQLite connection (WAL + pragmas)
+│   │   │   └── migrate.js           # Versioned migration runner
 │   │   ├── middleware/
 │   │   │   ├── auth.js              # JWT auth + role-based access
 │   │   │   ├── rateLimit.js         # Auth endpoint rate limiting
@@ -25,45 +42,26 @@ company-os/
 │   │   │   ├── dashboard.js         # Stats + activity data
 │   │   │   ├── ai.js                # AI chat + execution + delegation
 │   │   │   ├── knowledge.js         # Knowledge base CRUD + search
-│   │   │   ├── email.js             # Email read/send/AI draft
+│   │   │   ├── email.js             # Email read/send/AI draft (SMTP/IMAP)
 │   │   │   ├── workflows.js         # Workflow CRUD + triggers
 │   │   │   ├── notifications.js     # Notification API
 │   │   │   ├── uploads.js           # File upload/download
 │   │   │   └── system.js            # Admin: LLM config, execution loop, scheduler
 │   │   ├── services/
 │   │   │   ├── ai-engine.js         # LLM integration (OpenAI-compatible)
-│   │   │   ├── email.js             # Email service (SQLite-backed)
+│   │   │   ├── email-real.js        # Email service (SMTP + IMAP + SQLite)
 │   │   │   ├── workflows.js         # Workflow engine (SQLite-backed)
 │   │   │   ├── notifications.js     # Notification broadcast via Socket.IO
-│   │   │   ├── execution-loop.js    # Auto task execution background service
-│   │   │   └── scheduler.js         # Cron-like scheduled task runner
-│   │   └── index.js                 # Entry point + Socket.IO setup
+│   │   │   ├── execution-loop.js    # Auto task execution (retry + backoff + DLQ)
+│   │   │   └── scheduler.js         # Cron scheduler (DB-persisted)
+│   │   └── index.js                 # Entry point + Socket.IO + graceful shutdown
+│   ├── jest.config.js
 │   ├── Dockerfile
 │   └── package.json
 ├── web/                             # Next.js 14 frontend
-│   ├── app/
-│   │   ├── layout.js                # Sidebar + Socket.IO + ToastProvider
-│   │   ├── page.js                  # Redirect logic
-│   │   ├── login/                   # Auth page
-│   │   ├── dashboard/               # Stats + quick actions + activity
-│   │   ├── departments/             # Department cards + detail expansion
-│   │   ├── tasks/                   # Task list + filters + detail modal
-│   │   ├── agents/                  # Agent cards + edit modal
-│   │   ├── chat/                    # Real-time chat + agent chat
-│   │   ├── knowledge/               # Articles + search + filters
-│   │   ├── email/                   # Email client + AI replies
-│   │   ├── workflows/               # Workflow editor + execution log
-│   │   ├── analytics/               # Charts + real data
-│   │   └── settings/                # Profile, security, team, system, scheduler
-│   ├── components/
-│   │   ├── Toast.js                 # Toast notification system
-│   │   ├── NotificationBell.js      # Real-time notification dropdown
-│   │   ├── CommandPalette.js        # ⌘K global search
-│   │   ├── TaskDetailModal.js       # Task detail + comments + attachments
-│   │   └── AgentEditModal.js        # Agent configuration modal
-│   ├── lib/
-│   │   ├── api.js                   # API client (50+ endpoints)
-│   │   └── auth.js                  # Auth context + token management
+│   ├── app/                         # 12 pages (App Router)
+│   ├── components/                  # 5 shared components
+│   ├── lib/                         # API client + auth context
 │   ├── Dockerfile
 │   └── package.json
 ├── docker-compose.yml
@@ -88,6 +86,9 @@ cp .env.example .env
 cd server && npm install && cd ..
 cd web && npm install && cd ..
 
+# Run migrations (creates DB + tables + indexes)
+cd server && npm run migrate
+
 # Run server (terminal 1)
 cd server && JWT_SECRET=your-secret npm run dev
 
@@ -106,6 +107,77 @@ JWT_SECRET=your-secret docker-compose up --build
 - **API:** http://localhost:3001
 - **Health check:** http://localhost:3001/api/health
 
+## Testing
+
+```bash
+# Run all tests (68 tests)
+cd server && npm test
+
+# Run with coverage
+cd server && npm run test:coverage
+
+# Watch mode
+cd server && npm run test:watch
+```
+
+**Test coverage:**
+- `auth.test.js` — Registration, login, profile, password change, token validation (14 tests)
+- `tasks.test.js` — CRUD, filtering, comments, completion, deletion (13 tests)
+- `workflows.test.js` — CRUD, toggle, stats, manual triggers (11 tests)
+- `ai.test.js` — Agent chat, task execution, delegation, agent management (12 tests)
+- `departments.test.js` — Departments, knowledge base, email (18 tests)
+
+## Error Recovery
+
+The execution loop includes production-grade error handling:
+
+- **Retry with exponential backoff** — Failed tasks retry up to 3 times with delays of 10s, 20s, 40s
+- **Dead letter queue** — Tasks that exhaust retries are marked as permanently failed with error details
+- **Execution timeout** — Each task execution has a configurable timeout (default 2 minutes)
+- **Graceful degradation** — LLM failures don't crash the server; tasks are retried or dead-lettered
+- **Notification on failure** — Task creators are notified of retries and dead-lettering
+
+## Database Migrations
+
+Schema is managed through versioned migrations in `src/config/migrate.js`:
+
+| Migration | Description |
+|-----------|-------------|
+| v1 | Initial schema (12 tables) |
+| v2 | Performance indexes (30+ indexes on common queries) |
+| v3 | Task retry fields (retry_count, max_retries, last_error, timeout) |
+| v4 | scheduled_tasks table (DB-persisted cron) |
+| v5 | Email IMAP fields (message_id, uid) |
+
+```bash
+# Run migrations manually
+cd server && npm run migrate
+
+# Migrations run automatically on server startup
+```
+
+## Real Email (SMTP + IMAP)
+
+When SMTP is configured, emails are sent via real mail servers:
+
+```bash
+# .env — Outbound (SMTP)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your-email@gmail.com
+SMTP_PASS=your-app-password
+SMTP_FROM=your-email@gmail.com
+
+# .env — Inbound (IMAP polling)
+IMAP_HOST=imap.gmail.com
+IMAP_PORT=993
+IMAP_USER=your-email@gmail.com
+IMAP_PASS=your-app-password
+IMAP_POLL_INTERVAL_MS=60000
+```
+
+Without SMTP/IMAP config, email falls back to SQLite-only (stored locally, no real sending).
+
 ## Features
 
 ### 🔐 Security
@@ -117,6 +189,7 @@ JWT_SECRET=your-secret docker-compose up --build
 - Input validation and sanitization middleware
 - Dangerous file type blocking on uploads
 - Global error handler
+- Helmet HTTP security headers
 
 ### 🏢 Departments
 - CRUD with name, description, icon, color
@@ -128,19 +201,18 @@ JWT_SECRET=your-secret docker-compose up --build
 - Full CRUD with priority (urgent/high/medium/low) and status (pending/in_progress/review/completed/blocked)
 - Assign to users or AI agents
 - Due dates with overdue detection
+- Retry tracking with exponential backoff
 - Task detail modal with:
   - Inline status changes
   - Comment/activity feed
   - File attachments (upload, download, delete)
 - Notifications on assignment, completion, and comments
-- Click-to-open detail modal
 
 ### 🤖 AI Agents
 - Per-department agent configuration
 - System prompt editor with character count
 - Model selection (GPT-4, Claude, Llama, Mistral, etc.)
 - Status management (active/paused/offline)
-- Agent edit modal
 - Task execution with context (task details, comments, department)
 - Agent-to-agent delegation
 - Graceful fallback to simulated responses when no API key
@@ -150,11 +222,15 @@ JWT_SECRET=your-secret docker-compose up --build
 - Auto-executes tasks assigned to active agents
 - Priority-ordered (urgent first)
 - Max 3 concurrent executions
-- Auto-notifies on completion or failure
-- Failed tasks marked as blocked
+- Retry with exponential backoff (10s, 20s, 40s)
+- Dead letter queue after max retries
+- Execution timeout (configurable, default 2min)
+- Auto-notifies on completion, failure, retry, and dead-letter
 - Admin start/stop toggle + manual run trigger
+- Detailed execution stats (total, succeeded, failed, retried, dead-lettered)
 
 ### ⏰ Cron Scheduler
+- DB-persisted (survives restarts)
 - Three schedule types: daily, weekly, interval
 - Per-schedule agent assignment and priority
 - Auto-calculates next run time
@@ -176,11 +252,11 @@ JWT_SECRET=your-secret docker-compose up --build
 
 ### 📧 Email
 - Inbox, Sent, Drafts, Starred folders
-- Compose and reply
-- AI-generated draft replies
+- Compose and reply (via SMTP when configured)
+- AI-generated draft replies (uses LLM when configured)
 - Search across emails
-- Label system
-- Star toggle
+- Label system, star toggle
+- IMAP inbound polling (when configured)
 
 ### ⚡ Workflow Engine
 - Trigger-based automation (task_created, task_completed, schedule_daily, user_registered, etc.)
@@ -190,64 +266,27 @@ JWT_SECRET=your-secret docker-compose up --build
 - Execution log with history
 - SQLite-persisted (not in-memory)
 
-### 📈 Analytics
-- Donut charts (completion rate, agent status, urgent tasks)
-- Bar charts (tasks by status, tasks by priority)
-- Real weekly activity data (from API)
-- Department breakdown
+### 📈 Analytics, 🔔 Notifications, 🔍 Command Palette, 📎 File Uploads, ⚙️ Admin Panel
+(See original README for details on these features)
 
-### 🔔 Notifications
-- Real-time push via Socket.IO
-- Types: task_assigned, task_completed, task_comment, agent_response, workflow_triggered, system
-- Bell icon with unread badge
-- Dropdown with mark-all-read
-- Auto-join user room on connection
-
-### 🔍 Command Palette
-- Ctrl/⌘+K global search
-- Search across tasks, articles, agents
-- Quick navigation shortcuts
-- Keyboard navigation (↑↓ Enter ESC)
-
-### 📎 File Uploads
-- Multer-based with 10MB limit
-- Per-user directories with random filenames
-- Task attachments (upload, download, delete)
-- Dangerous file type blocking
-- Token-based download links
-
-### ⚙️ Settings (Admin System Panel)
-- **Profile:** Update name, department
-- **Security:** Change password with verification
-- **Team:** Manage user roles (admin only)
-- **System:** LLM config status, test connection, server metrics
-- **Scheduler:** Cron task management
-- **About:** Version and tech stack info
-
-### 📊 Dashboard
-- Stats cards (departments, users, agents, active tasks, urgent)
-- Quick actions bar
-- Recent tasks with status badges
-- Agent status breakdown
-- Recent notifications widget
-- Current date display
-
-## Database Schema (12 Tables)
+## Database Schema (13 Tables)
 
 | Table | Description |
 |-------|-------------|
 | `users` | Authentication, roles, profiles |
 | `departments` | Organizational units |
 | `agents` | AI agent configurations |
-| `tasks` | Task management with assignments |
+| `tasks` | Task management with assignments + retry tracking |
 | `task_comments` | Task activity and agent responses |
 | `messages` | Chat message history |
 | `knowledge_base` | Articles and documentation |
-| `workflows` | Automation rules (SQLite) |
+| `workflows` | Automation rules |
 | `workflow_logs` | Execution history |
-| `emails` | Email storage (SQLite) |
+| `emails` | Email storage (SQLite + IMAP fields) |
 | `notifications` | User notifications |
 | `uploads` | File attachment metadata |
+| `scheduled_tasks` | DB-persisted cron schedules |
+| `schema_migrations` | Migration version tracking |
 
 ## API Endpoints (50+)
 
@@ -314,11 +353,12 @@ JWT_SECRET=your-secret docker-compose up --build
 |--------|----------|-------------|
 | GET | `/api/email/:folder` | List by folder |
 | GET | `/api/email/item/:id` | Single email |
-| POST | `/api/email/send` | Send email |
+| POST | `/api/email/send` | Send email (SMTP when configured) |
 | POST | `/api/email/draft` | Save draft |
 | POST | `/api/email/:id/star` | Toggle star |
 | POST | `/api/email/:id/move` | Move to folder |
-| POST | `/api/email/:id/draft-reply` | AI draft reply |
+| POST | `/api/email/:id/draft-reply` | AI draft reply (LLM when configured) |
+| GET | `/api/email/meta/health` | SMTP/IMAP status |
 
 ### Workflows
 | Method | Endpoint | Description |
@@ -376,6 +416,22 @@ LLM_API_URL=https://api.openai.com/v1/chat/completions
 LLM_API_KEY=sk-...
 DEFAULT_MODEL=gpt-4
 
+# SMTP (optional — outbound email)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=your-email@gmail.com
+SMTP_PASS=your-app-password
+SMTP_FROM=your-email@gmail.com
+
+# IMAP (optional — inbound email polling)
+IMAP_HOST=imap.gmail.com
+IMAP_PORT=993
+IMAP_SECURE=true
+IMAP_USER=your-email@gmail.com
+IMAP_PASS=your-app-password
+IMAP_POLL_INTERVAL_MS=60000
+
 # Frontend (web/.env.local)
 NEXT_PUBLIC_API_URL=http://localhost:3001
 ```
@@ -389,9 +445,11 @@ NEXT_PUBLIC_API_URL=http://localhost:3001
 | Styling | Tailwind CSS, CSS custom properties |
 | Real-time | Socket.IO (chat, notifications, typing) |
 | Auth | JWT + bcrypt |
-| Database | SQLite with WAL mode |
+| Database | SQLite with WAL mode + migrations |
 | AI Engine | OpenAI-compatible API (pluggable) |
+| Email | Nodemailer (SMTP) + ImapFlow (IMAP) |
 | File Upload | Multer |
+| Testing | Jest + Supertest |
 | Deployment | Docker, docker-compose |
 | Security | Helmet, CORS, rate limiting, input validation |
 

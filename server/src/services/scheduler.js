@@ -1,28 +1,16 @@
 /**
- * Cron Scheduler
- * 
- * Manages scheduled/recurring agent tasks.
- * Tasks can be scheduled at specific times, intervals, or cron-like patterns.
+ * Cron Scheduler (SQLite-backed)
+ *
+ * Manages scheduled/recurring agent tasks with full DB persistence.
+ * Schedules survive restarts — no in-memory state.
  */
 
 const db = require('../config/db');
 const { executeTask } = require('./ai-engine');
 const notificationService = require('./notifications');
 
-// In-memory schedule storage (persisted to DB)
-const schedules = new Map();
-let scheduleIdCounter = 1;
 let checkInterval = null;
-
-/**
- * Seed default schedules from DB or defaults
- */
-function seedSchedules() {
-  const count = db.prepare('SELECT COUNT(*) as c FROM scheduled_tasks').get().c;
-  if (count > 0) return;
-
-  // No default schedules — users create them via UI
-}
+const CHECK_INTERVAL_MS = 60 * 1000; // Check every minute
 
 /**
  * Start the scheduler
@@ -30,9 +18,8 @@ function seedSchedules() {
 function start() {
   if (checkInterval) return;
   console.log('⏰ Cron scheduler started');
-  // Check every minute
-  checkInterval = setInterval(checkSchedules, 60 * 1000);
-  checkSchedules(); // Run immediately
+  checkInterval = setInterval(checkSchedules, CHECK_INTERVAL_MS);
+  checkSchedules();
 }
 
 /**
@@ -50,22 +37,34 @@ function stop() {
  * Check and run due schedules
  */
 async function checkSchedules() {
-  const now = new Date();
+  const now = new Date().toISOString();
 
-  for (const [id, schedule] of schedules) {
-    if (!schedule.enabled) continue;
-    if (schedule.nextRun && new Date(schedule.nextRun) > now) continue;
+  let schedules;
+  try {
+    schedules = db.prepare(`
+      SELECT * FROM scheduled_tasks
+      WHERE enabled = 1 AND (next_run IS NULL OR next_run <= ?)
+    `).all(now);
+  } catch (err) {
+    // Table may not exist yet if migration hasn't run
+    if (err.message.includes('no such table')) return;
+    throw err;
+  }
 
+  for (const schedule of schedules) {
     try {
       await executeSchedule(schedule);
     } catch (err) {
-      console.error(`Schedule ${id} failed:`, err.message);
+      console.error(`⏰ Schedule "${schedule.name}" failed:`, err.message);
     }
 
-    // Calculate next run
-    schedule.lastRun = now.toISOString();
-    schedule.runCount = (schedule.runCount || 0) + 1;
-    schedule.nextRun = calculateNextRun(schedule).toISOString();
+    // Update last_run and next_run
+    const nextRun = calculateNextRun(schedule);
+    db.prepare(`
+      UPDATE scheduled_tasks
+      SET run_count = run_count + 1, last_run = ?, next_run = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(now, nextRun, schedule.id);
   }
 }
 
@@ -81,67 +80,63 @@ async function executeSchedule(schedule) {
     VALUES (?, ?, ?, ?, ?, 1, 'pending')
   `).run(
     schedule.name,
-    schedule.description || `Scheduled task: ${schedule.name}`,
+    schedule.description || `Scheduled: ${schedule.name}`,
     schedule.priority || 'medium',
     schedule.department_id || null,
     schedule.agent_id || null,
   );
 
-  // If an agent is assigned, the execution loop will pick it up
-  // If no agent, just log it
+  // If an agent is assigned, try to execute immediately
   if (schedule.agent_id) {
-    // Immediately try to execute
     try {
       await executeTask(result.lastInsertRowid);
     } catch (err) {
-      console.error(`Scheduled task execution failed:`, err.message);
+      console.error(`⏰ Scheduled task execution failed:`, err.message);
+      // Execution loop will pick it up on retry
     }
   }
 
-  // Log the execution
+  // Notify admin
   notificationService.notify({
-    userId: 1, // admin
+    userId: 1,
     type: 'workflow_triggered',
     title: 'Scheduled task executed',
-    body: `"${schedule.name}" ran at ${new Date().toLocaleTimeString()}`,
-    link: '/workflows',
+    body: `"${schedule.name}" ran`,
+    link: '/settings',
     data: { scheduleId: schedule.id },
   });
 }
 
 /**
- * Calculate next run time based on schedule config
+ * Calculate next run time
  */
 function calculateNextRun(schedule) {
   const now = new Date();
 
   switch (schedule.type) {
     case 'interval': {
-      // Every N minutes/hours
-      const ms = (schedule.intervalMinutes || 60) * 60 * 1000;
-      return new Date(now.getTime() + ms);
+      const ms = (schedule.interval_minutes || 60) * 60 * 1000;
+      return new Date(now.getTime() + ms).toISOString();
     }
     case 'daily': {
-      // Same time every day
       const [h, m] = (schedule.time || '09:00').split(':').map(Number);
       const next = new Date(now);
       next.setHours(h, m, 0, 0);
       if (next <= now) next.setDate(next.getDate() + 1);
-      return next;
+      return next.toISOString();
     }
     case 'weekly': {
-      // Specific day of week
-      const dayOfWeek = schedule.dayOfWeek || 1; // Monday
+      const dayOfWeek = schedule.day_of_week ?? 1;
       const [h2, m2] = (schedule.time || '09:00').split(':').map(Number);
       const next = new Date(now);
       next.setHours(h2, m2, 0, 0);
       const daysUntil = (dayOfWeek - now.getDay() + 7) % 7 || 7;
       next.setDate(next.getDate() + daysUntil);
       if (next <= now) next.setDate(next.getDate() + 7);
-      return next;
+      return next.toISOString();
     }
     default:
-      return new Date(now.getTime() + 60 * 60 * 1000); // Default: 1 hour
+      return new Date(now.getTime() + 60 * 60 * 1000).toISOString();
   }
 }
 
@@ -149,46 +144,73 @@ function calculateNextRun(schedule) {
  * Create a scheduled task
  */
 function createSchedule(data) {
-  const id = scheduleIdCounter++;
-  const schedule = {
-    id,
-    name: data.name,
-    description: data.description || '',
-    type: data.type || 'daily',
-    time: data.time || '09:00',
-    dayOfWeek: data.dayOfWeek,
-    intervalMinutes: data.intervalMinutes,
-    agent_id: data.agent_id || null,
-    department_id: data.department_id || null,
-    priority: data.priority || 'medium',
-    enabled: true,
-    runCount: 0,
-    lastRun: null,
-    nextRun: calculateNextRun({ ...data, id }).toISOString(),
-    createdAt: new Date().toISOString(),
-  };
-  schedules.set(id, schedule);
-  return schedule;
+  const nextRun = calculateNextRun(data);
+  const result = db.prepare(`
+    INSERT INTO scheduled_tasks (name, description, type, time, day_of_week, interval_minutes, agent_id, department_id, priority, next_run)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    data.name,
+    data.description || '',
+    data.type || 'daily',
+    data.time || '09:00',
+    data.dayOfWeek ?? data.day_of_week ?? null,
+    data.intervalMinutes ?? data.interval_minutes ?? null,
+    data.agent_id || null,
+    data.department_id || null,
+    data.priority || 'medium',
+    nextRun,
+  );
+
+  return db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(result.lastInsertRowid);
 }
 
 /**
  * Update a schedule
  */
 function updateSchedule(id, data) {
-  const schedule = schedules.get(parseInt(id));
-  if (!schedule) return null;
-  Object.assign(schedule, data);
-  if (data.type || data.time || data.dayOfWeek || data.intervalMinutes) {
-    schedule.nextRun = calculateNextRun(schedule).toISOString();
+  const existing = db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id);
+  if (!existing) return null;
+
+  const updates = [];
+  const params = [];
+
+  const fieldMap = {
+    name: 'name', description: 'description', type: 'type',
+    time: 'time', dayOfWeek: 'day_of_week', day_of_week: 'day_of_week',
+    intervalMinutes: 'interval_minutes', interval_minutes: 'interval_minutes',
+    agent_id: 'agent_id', department_id: 'department_id',
+    priority: 'priority', enabled: 'enabled',
+  };
+
+  for (const [inputKey, dbKey] of Object.entries(fieldMap)) {
+    if (data[inputKey] !== undefined) {
+      updates.push(`${dbKey} = ?`);
+      params.push(data[inputKey]);
+    }
   }
-  return schedule;
+
+  if (updates.length === 0) return existing;
+
+  // Recalculate next_run if timing changed
+  if (data.type || data.time || data.dayOfWeek || data.day_of_week ||
+      data.intervalMinutes || data.interval_minutes) {
+    const merged = { ...existing, ...data };
+    updates.push('next_run = ?');
+    params.push(calculateNextRun(merged));
+  }
+
+  updates.push('updated_at = CURRENT_TIMESTAMP');
+  params.push(id);
+
+  db.prepare(`UPDATE scheduled_tasks SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+  return db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id);
 }
 
 /**
  * Delete a schedule
  */
 function deleteSchedule(id) {
-  schedules.delete(parseInt(id));
+  db.prepare('DELETE FROM scheduled_tasks WHERE id = ?').run(id);
   return true;
 }
 
@@ -196,31 +218,50 @@ function deleteSchedule(id) {
  * Toggle a schedule
  */
 function toggleSchedule(id) {
-  const schedule = schedules.get(parseInt(id));
-  if (schedule) {
-    schedule.enabled = !schedule.enabled;
-    if (schedule.enabled) {
-      schedule.nextRun = calculateNextRun(schedule).toISOString();
-    }
-  }
-  return schedule;
+  const schedule = db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id);
+  if (!schedule) return null;
+
+  const newEnabled = schedule.enabled ? 0 : 1;
+  const nextRun = newEnabled ? calculateNextRun(schedule) : null;
+
+  db.prepare(`
+    UPDATE scheduled_tasks SET enabled = ?, next_run = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(newEnabled, nextRun, id);
+
+  return db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id);
 }
 
 /**
  * Get all schedules
  */
 function getSchedules() {
-  return Array.from(schedules.values());
+  try {
+    return db.prepare('SELECT * FROM scheduled_tasks ORDER BY created_at DESC').all();
+  } catch (err) {
+    if (err.message.includes('no such table')) return [];
+    throw err;
+  }
 }
 
 /**
  * Get scheduler status
  */
 function getStatus() {
+  let totalSchedules = 0;
+  let enabledSchedules = 0;
+
+  try {
+    totalSchedules = db.prepare('SELECT COUNT(*) as c FROM scheduled_tasks').get().c;
+    enabledSchedules = db.prepare('SELECT COUNT(*) as c FROM scheduled_tasks WHERE enabled = 1').get().c;
+  } catch (err) {
+    // Table may not exist yet
+  }
+
   return {
     running: checkInterval !== null,
-    totalSchedules: schedules.size,
-    enabledSchedules: Array.from(schedules.values()).filter(s => s.enabled).length,
+    totalSchedules,
+    enabledSchedules,
   };
 }
 

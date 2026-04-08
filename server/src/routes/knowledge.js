@@ -90,17 +90,17 @@ router.post('/search', authMiddleware, (req, res) => {
   if (!query) return res.status(400).json({ error: 'Query required' });
 
   let sql = `
-    SELECT id, title, substr(content, 1, 300) as excerpt, category, department_id,
+    SELECT kb.id, kb.title, substr(kb.content, 1, 300) as excerpt, kb.category, kb.department_id,
     d.name as department_name
     FROM knowledge_base kb
     LEFT JOIN departments d ON kb.department_id = d.id
-    WHERE (title LIKE ? OR content LIKE ?)
+    WHERE (kb.title LIKE ? OR kb.content LIKE ?)
   `;
   const params = [`%${query}%`, `%${query}%`];
 
   if (department_id) { sql += ' AND kb.department_id = ?'; params.push(department_id); }
 
-  sql += ' ORDER BY updated_at DESC LIMIT ?';
+  sql += ' ORDER BY kb.updated_at DESC LIMIT ?';
   params.push(limit || 10);
 
   const results = db.prepare(sql).all(...params);

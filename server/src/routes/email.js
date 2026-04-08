@@ -1,6 +1,6 @@
 const express = require('express');
 const { authMiddleware } = require('../middleware/auth');
-const emailService = require('../services/email');
+const emailService = require('../services/email-real');
 
 const router = express.Router();
 
@@ -19,6 +19,11 @@ router.get('/:folder', authMiddleware, (req, res) => {
 // Get stats
 router.get('/meta/stats', authMiddleware, (req, res) => {
   res.json(emailService.getEmailStats());
+});
+
+// Get email health
+router.get('/meta/health', authMiddleware, (req, res) => {
+  res.json(emailService.getHealth());
 });
 
 // Get single email
@@ -48,12 +53,16 @@ router.post('/:id/move', authMiddleware, (req, res) => {
   res.json(email);
 });
 
-// Send email
-router.post('/send', authMiddleware, (req, res) => {
+// Send email (async — may use real SMTP)
+router.post('/send', authMiddleware, async (req, res) => {
   const { to, subject, body, inReplyTo } = req.body;
   if (!to || !subject) return res.status(400).json({ error: 'To and subject required' });
-  const email = emailService.sendEmail({ to, subject, body, inReplyTo, userId: req.user.id });
-  res.status(201).json(email);
+  try {
+    const email = await emailService.sendEmail({ to, subject, body, inReplyTo, userId: req.user.id });
+    res.status(201).json(email);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Save draft
@@ -62,7 +71,7 @@ router.post('/draft', authMiddleware, (req, res) => {
   res.status(201).json(draft);
 });
 
-// AI reply draft
+// AI reply draft (async — may use LLM)
 router.post('/:id/draft-reply', authMiddleware, async (req, res) => {
   try {
     const { instructions } = req.body;

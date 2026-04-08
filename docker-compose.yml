@@ -14,9 +14,30 @@ services:
       - LLM_API_URL=${LLM_API_URL:-https://api.openai.com/v1/chat/completions}
       - LLM_API_KEY=${LLM_API_KEY:-}
       - DEFAULT_MODEL=${DEFAULT_MODEL:-gpt-4}
+      # SMTP (optional)
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_SECURE=${SMTP_SECURE:-false}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      # IMAP (optional)
+      - IMAP_HOST=${IMAP_HOST:-}
+      - IMAP_PORT=${IMAP_PORT:-993}
+      - IMAP_SECURE=${IMAP_SECURE:-true}
+      - IMAP_USER=${IMAP_USER:-}
+      - IMAP_PASS=${IMAP_PASS:-}
+      - IMAP_POLL_INTERVAL_MS=${IMAP_POLL_INTERVAL_MS:-60000}
     volumes:
       - db-data:/data
+      - upload-data:/app/data/uploads
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/api/health').then(r=>process.exit(r.ok?0:1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   web:
     build: ./web
@@ -25,8 +46,10 @@ services:
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:3001
     depends_on:
-      - server
+      server:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
   db-data:
+  upload-data:
