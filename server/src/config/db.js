@@ -231,15 +231,33 @@ function createSqliteAdapter() {
   db.pragma('mmap_size = 268435456');
   console.log('📦 SQLite adapter initialized:', actualPath);
 
+  // Convert booleans to integers for SQLite binding
+  function mapParam(val) {
+    if (val === true) return 1;
+    if (val === false) return 0;
+    return val;
+  }
+  function mapParams(params) {
+    return params.map(p => {
+      if (p !== null && typeof p === 'object' && !Array.isArray(p) && !Buffer.isBuffer(p)) {
+        // Named params object — convert booleans in values
+        const mapped = {};
+        for (const [k, v] of Object.entries(p)) mapped[k] = mapParam(v);
+        return mapped;
+      }
+      return mapParam(p);
+    });
+  }
+
   function prepare(sql) {
     const stmt = db.prepare(sql);
     return {
       run(...params) {
-        const result = stmt.run(...params);
+        const result = stmt.run(...mapParams(params));
         return { changes: result.changes, lastInsertRowid: Number(result.lastInsertRowid) };
       },
-      get(...params) { return stmt.get(...params); },
-      all(...params) { return stmt.all(...params); },
+      get(...params) { return stmt.get(...mapParams(params)); },
+      all(...params) { return stmt.all(...mapParams(params)); },
     };
   }
 
