@@ -85,7 +85,12 @@ try {
   if (countRow && typeof countRow.then === 'function') { countRow.then(doSeed).catch(() => {}); } else { doSeed(countRow); }
 } catch (e) { /* Table may not exist yet */ }
 
-function rowToEmail(row) { if (!row) return null; return { ...row, from: row.from_addr, to: row.to_addr, read: !!row.read, starred: !!row.starred, labels: JSON.parse(row.labels || '[]') }; }
+function safeJson(val, fallback) {
+  if (val === null || val === undefined) return fallback;
+  if (typeof val === 'object') return val;
+  try { return JSON.parse(val); } catch { return fallback; }
+}
+function rowToEmail(row) { if (!row) return null; return { ...row, from: row.from_addr, to: row.to_addr, read: !!row.read, starred: !!row.starred, labels: safeJson(row.labels, []) }; }
 
 async function getEmails(folder = 'inbox', options = {}) {
   let query = 'SELECT * FROM emails WHERE folder = ?';

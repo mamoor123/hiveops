@@ -27,7 +27,7 @@ function rateLimiter({ windowMs = 15 * 60 * 1000, maxAttempts = 20 } = {}) {
 }
 
 // Clean up old entries periodically
-setInterval(() => {
+const cleanupTimer = setInterval(() => {
   const now = Date.now();
   const windowMs = 15 * 60 * 1000;
   for (const [key, record] of attempts) {
@@ -36,5 +36,6 @@ setInterval(() => {
     }
   }
 }, 5 * 60 * 1000);
+if (cleanupTimer.unref) cleanupTimer.unref();
 
 module.exports = { rateLimiter };

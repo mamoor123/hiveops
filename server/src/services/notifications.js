@@ -19,6 +19,12 @@ async function notifyMany(userIds, opts) {
   return results;
 }
 
+function safeJson(val, fallback) {
+  if (val === null || val === undefined) return fallback;
+  if (typeof val === 'object') return val;
+  try { return JSON.parse(val); } catch { return fallback; }
+}
+
 async function getNotifications(userId, { unreadOnly = false, limit = 50 } = {}) {
   let query = 'SELECT * FROM notifications WHERE user_id = ?';
   const params = [userId];
@@ -26,7 +32,7 @@ async function getNotifications(userId, { unreadOnly = false, limit = 50 } = {})
   query += ' ORDER BY created_at DESC LIMIT ?';
   params.push(limit);
   const rows = await db.prepare(query).all(...params);
-  return rows.map(row => ({ ...row, data: JSON.parse(row.data || '{}'), read: !!row.read }));
+  return rows.map(row => ({ ...row, data: safeJson(row.data, {}), read: !!row.read }));
 }
 
 async function getUnreadCount(userId) {

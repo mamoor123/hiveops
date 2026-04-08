@@ -25,9 +25,15 @@ try {
   }
 } catch (e) { /* Table may not exist yet */ }
 
+function safeJsonParse(val, fallback = []) {
+  if (val === null || val === undefined) return fallback;
+  if (typeof val === 'object') return val; // PG JSONB returns objects directly
+  try { return JSON.parse(val); } catch { return fallback; }
+}
+
 function rowToWorkflow(row) {
   if (!row) return null;
-  return { ...row, conditions: JSON.parse(row.conditions || '[]'), actions: JSON.parse(row.actions || '[]'), enabled: !!row.enabled };
+  return { ...row, conditions: safeJsonParse(row.conditions, []), actions: safeJsonParse(row.actions, []), enabled: !!row.enabled };
 }
 
 async function getWorkflows() {
@@ -124,7 +130,7 @@ async function processTrigger(triggerName, context = {}) {
 
 async function getExecutionLog(limit = 20) {
   const rows = await db.prepare('SELECT wl.*, w.name as workflow_name FROM workflow_logs wl LEFT JOIN workflows w ON wl.workflow_id = w.id ORDER BY wl.created_at DESC LIMIT ?').all(limit);
-  return rows.map(row => ({ ...row, context: JSON.parse(row.context || '{}'), results: JSON.parse(row.results || '[]') }));
+  return rows.map(row => ({ ...row, context: safeJsonParse(row.context, {}), results: safeJsonParse(row.results, []) }));
 }
 
 async function getWorkflowStats() {
