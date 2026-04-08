@@ -18,9 +18,12 @@
  *
  * Auto-converts ? → $1,$2 for PG.
  * Auto-converts @param → $1,$2 for PG (better-sqlite3 named params).
- * Auto-quotes reserved words (trigger).
  * Auto-converts boolean comparisons (read = 0 → read = false) for PG.
+ * Auto-converts boolean param values (0/1 → true/false) for PG.
  * Auto-appends RETURNING id to INSERT queries for lastInsertRowid.
+ *
+ * NOTE: For PG compatibility, always quote "trigger" in SQL strings
+ * (the reserved word). The transformer no longer auto-quotes it.
  */
 
 const path = require('path');
@@ -43,25 +46,15 @@ function createPgAdapter() {
 
   /**
    * Transform SQL for PostgreSQL compatibility:
-   * 1. Quote reserved word "trigger" as "trigger"
-   * 2. Convert @named params to $1, $2 (better-sqlite3 → pg)
-   * 3. Convert ? positional params to $1, $2
-   * 4. Convert integer boolean comparisons (= 0 / = 1) to (= false / = true)
+   * 1. Convert @named params to $1, $2 (better-sqlite3 → pg)
+   * 2. Convert ? positional params to $1, $2
+   * 3. Convert integer boolean comparisons (= 0 / = 1) to (= false / = true)
    */
   function transformForPg(sql) {
     let result = sql;
 
-    // 1. Quote reserved word "trigger" — but not inside string literals
-    //    Match trigger as a column name (word boundary, not in quotes)
-    result = result.replace(/\btrigger\b/g, (match, offset) => {
-      // Check if inside single quotes
-      const before = result.substring(0, offset);
-      const openQuotes = (before.match(/'/g) || []).length;
-      if (openQuotes % 2 === 1) return match; // inside string literal
-      return '"trigger"';
-    });
-
-    // 2. Convert @named parameters to $1, $2
+    // 1. Convert @named parameters to $1, $2
+    //    Must handle @trigger before any other processing
     const namedParams = [];
     result = result.replace(/@(\w+)/g, (match, name) => {
       const idx = namedParams.indexOf(name);
@@ -72,17 +65,16 @@ function createPgAdapter() {
       return `$${idx + 1}`;
     });
 
-    // 3. Convert ? to $1, $2 (only if no $ params exist yet)
+    // 2. Convert ? to $1, $2 (only if no $ params exist yet)
     if (!result.includes('$1')) {
       let i = 0;
       result = result.replace(/\?/g, () => `$${++i}`);
     }
 
-    // 4. Convert integer boolean comparisons for known boolean columns
+    // 3. Convert integer boolean comparisons for known boolean columns
     //    Handles: column = 0, column = 1 patterns
     const booleanCols = ['read', 'starred', 'enabled'];
     for (const col of booleanCols) {
-      // "= 0" → "= false", "= 1" → "= true"
       result = result.replace(
         new RegExp(`\\b${col}\\s*=\\s*0\\b`, 'gi'),
         `${col} = false`
@@ -101,8 +93,8 @@ function createPgAdapter() {
    * Also converts integer 0/1 to boolean true/false for known boolean columns.
    */
   function convertParams(params, namedParams, sql) {
+    // Named params: { name: 'foo', enabled: 1 } → ['foo', true]
     if (namedParams.length > 0 && params.length === 1 && typeof params[0] === 'object' && params[0] !== null) {
-      // Named params: { name: 'foo', enabled: 1 } → ['foo', true]
       const booleanCols = ['read', 'starred', 'enabled'];
       return namedParams.map(name => {
         const val = params[0][name];
@@ -112,19 +104,18 @@ function createPgAdapter() {
         return val;
       });
     }
-    // Positional params — convert 0/1 to boolean for boolean columns
-    const booleanCols = ['read', 'starred', 'enabled'];
-    const insertBoolCols = ['read', 'starred', 'enabled'];
-    const isInsert = /^\s*INSERT/i.test(sql);
 
-    // For INSERT, try to detect which params map to boolean columns
-    if (isInsert) {
+    // Positional params — detect boolean column assignments
+    const booleanCols = ['read', 'starred', 'enabled'];
+
+    // For INSERT, detect which params map to boolean columns
+    if (/^\s*INSERT/i.test(sql)) {
       const colMatch = sql.match(/INSERT\s+INTO\s+\w+\s*\(([^)]+)\)/i);
       if (colMatch) {
         const cols = colMatch[1].split(',').map(c => c.trim().replace(/"/g, ''));
         return params.map((val, i) => {
           const col = cols[i];
-          if (col && insertBoolCols.includes(col) && (val === 0 || val === 1)) {
+          if (col && booleanCols.includes(col) && (val === 0 || val === 1)) {
             return val === 1;
           }
           return val;
@@ -141,7 +132,7 @@ function createPgAdapter() {
         const converted = [];
         for (const assignment of assignments) {
           const colName = assignment.split('=')[0]?.trim().replace(/"/g, '');
-          const hasPlaceholder = /[=$]\s*\$\d+/.test(assignment) || /[=$]\s*\?/.test(assignment);
+          const hasPlaceholder = /\$\d+/.test(assignment);
           if (hasPlaceholder && paramIdx < params.length) {
             const val = params[paramIdx];
             if (colName && booleanCols.includes(colName) && (val === 0 || val === 1)) {
@@ -173,11 +164,13 @@ function createPgAdapter() {
   }
 
   function prepare(sql) {
+    // Transform once at prepare time for get/all (no RETURNING needed)
     const { sql: transformedSql, namedParams } = transformForPg(sql);
 
     return {
       run(...params) {
-        const finalSql = transformForPg(maybeAddReturning(sql)).sql;
+        // Re-transform with RETURNING for run
+        const { sql: finalSql } = transformForPg(maybeAddReturning(sql));
         const convertedParams = convertParams(params, namedParams, sql);
         return pool.query(finalSql, convertedParams).then(result => ({
           changes: result.rowCount,
@@ -196,7 +189,7 @@ function createPgAdapter() {
   }
 
   function exec(sql) {
-    const statements = sql.split(/;\s*(?=(?:[^']*'[^']*')*[^']*$)/).map(s => s.trim()).filter(s => s.length > 0);
+    const statements = sql.split(/;\s*\n/).map(s => s.trim()).filter(s => s.length > 0);
     return (async () => {
       const client = await pool.connect();
       try {

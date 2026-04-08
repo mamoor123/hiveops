@@ -15,7 +15,7 @@ try {
       { name: 'Escalate overdue tasks', description: 'Escalate tasks past due date', trigger: 'schedule_daily', conditions: JSON.stringify([{ field: 'due_date', operator: 'past_due' }]), actions: JSON.stringify([{ type: 'notify', target: 'admin', message: 'Task overdue' }, { type: 'update_task', field: 'status', value: 'blocked' }]), enabled: 1, runs: 12, last_run: new Date(Date.now() - 86400000).toISOString() },
       { name: 'Welcome new team members', description: 'Welcome message on registration', trigger: 'user_registered', conditions: JSON.stringify([]), actions: JSON.stringify([{ type: 'send_message', channel: 'general', message: 'Welcome {{user.name}} to the team! 🎉' }]), enabled: 1, runs: 1, last_run: new Date(Date.now() - 36000000).toISOString() },
     ];
-    const insert = db.prepare('INSERT INTO workflows (name, description, trigger, conditions, actions, enabled, runs, last_run) VALUES (@name, @description, @trigger, @conditions, @actions, @enabled, @runs, @last_run)');
+    const insert = db.prepare('INSERT INTO workflows (name, description, "trigger", conditions, actions, enabled, runs, last_run) VALUES (@name, @description, @trigger, @conditions, @actions, @enabled, @runs, @last_run)');
     for (const wf of defaults) insert.run(wf);
     console.log('✅ Seeded default workflows');
   }
@@ -29,7 +29,7 @@ function rowToWorkflow(row) {
 function getWorkflows() { return db.prepare('SELECT * FROM workflows ORDER BY created_at DESC').all().map(rowToWorkflow); }
 
 function createWorkflow(data, userId) {
-  const result = db.prepare('INSERT INTO workflows (name, description, trigger, conditions, actions, enabled, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)').run(data.name, data.description || '', data.trigger, JSON.stringify(data.conditions || []), JSON.stringify(data.actions || []), data.enabled !== false ? 1 : 0, userId || null);
+  const result = db.prepare('INSERT INTO workflows (name, description, "trigger", conditions, actions, enabled, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)').run(data.name, data.description || '', data.trigger, JSON.stringify(data.conditions || []), JSON.stringify(data.actions || []), data.enabled !== false ? 1 : 0, userId || null);
   return rowToWorkflow(db.prepare('SELECT * FROM workflows WHERE id = ?').get(result.lastInsertRowid));
 }
 
@@ -40,7 +40,7 @@ function updateWorkflow(id, data) {
   const params = [];
   if (data.name !== undefined) { updates.push('name = ?'); params.push(data.name); }
   if (data.description !== undefined) { updates.push('description = ?'); params.push(data.description); }
-  if (data.trigger !== undefined) { updates.push('trigger = ?'); params.push(data.trigger); }
+  if (data.trigger !== undefined) { updates.push('"trigger" = ?'); params.push(data.trigger); }
   if (data.conditions !== undefined) { updates.push('conditions = ?'); params.push(JSON.stringify(data.conditions)); }
   if (data.actions !== undefined) { updates.push('actions = ?'); params.push(JSON.stringify(data.actions)); }
   if (data.enabled !== undefined) { updates.push('enabled = ?'); params.push(data.enabled ? 1 : 0); }
@@ -101,7 +101,7 @@ function processTrigger(triggerName, context = {}) {
     if (evaluateConditions(wf.conditions, context)) {
       const actionResults = executeActions(wf.actions, context);
       db.prepare('UPDATE workflows SET runs = runs + 1, last_run = CURRENT_TIMESTAMP WHERE id = ?').run(wf.id);
-      db.prepare('INSERT INTO workflow_logs (workflow_id, trigger, context, results) VALUES (?, ?, ?, ?)').run(wf.id, triggerName, JSON.stringify(context), JSON.stringify(actionResults));
+      db.prepare('INSERT INTO workflow_logs (workflow_id, "trigger", context, results) VALUES (?, ?, ?, ?)').run(wf.id, triggerName, JSON.stringify(context), JSON.stringify(actionResults));
       results.push({ workflowId: wf.id, workflowName: wf.name, trigger: triggerName, actions: actionResults });
     }
   }
