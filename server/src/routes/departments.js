@@ -44,8 +44,8 @@ router.post(
 				.prepare("SELECT * FROM departments WHERE id = ?")
 				.get(result.lastInsertRowid);
 			res.status(201).json(dept);
-		} catch (err) {
-			res.status(500).json({ error: err.message });
+		} catch (_err) {
+			res.status(500).json({ error: "Internal server error" });
 		}
 	},
 );

@@ -46,7 +46,7 @@ const io = new Server(server, {
 const PORT = process.env.PORT || 3001;
 
 // Middleware
-app.use(helmet({ contentSecurityPolicy: false }));
+app.use(helmet());
 app.use(cors({ origin: process.env.CORS_ORIGIN || "http://localhost:3000" }));
 app.use(express.json({ limit: "1mb" }));
 
@@ -108,7 +108,7 @@ io.use((socket, next) => {
 	const token = socket.handshake.auth.token;
 	if (!token) return next(new Error("Authentication required"));
 	try {
-		socket.user = jwt.verify(token, JWT_SECRET);
+		socket.user = jwt.verify(token, JWT_SECRET, { algorithms: ["HS256"] });
 		next();
 	} catch {
 		next(new Error("Invalid token"));

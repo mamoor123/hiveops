@@ -51,14 +51,14 @@ router.post(
 			const token = jwt.sign(
 				{ id: result.lastInsertRowid, email, name, role: userRole },
 				JWT_SECRET,
-				{ expiresIn: "7d" },
+				{ algorithm: "HS256", expiresIn: "7d" },
 			);
 			res.status(201).json({
 				token,
 				user: { id: result.lastInsertRowid, email, name, role: userRole },
 			});
-		} catch (err) {
-			res.status(500).json({ error: err.message });
+		} catch (_err) {
+			res.status(500).json({ error: "Internal server error" });
 		}
 	},
 );
@@ -81,7 +81,7 @@ router.post(
 			const token = jwt.sign(
 				{ id: user.id, email: user.email, name: user.name, role: user.role },
 				JWT_SECRET,
-				{ expiresIn: "7d" },
+				{ algorithm: "HS256", expiresIn: "7d" },
 			);
 			res.json({
 				token,
@@ -93,8 +93,8 @@ router.post(
 					department_id: user.department_id,
 				},
 			});
-		} catch (err) {
-			res.status(500).json({ error: err.message });
+		} catch (_err) {
+			res.status(500).json({ error: "Internal server error" });
 		}
 	},
 );
@@ -155,8 +155,8 @@ router.put(
 				)
 				.get(req.user.id);
 			res.json(user);
-		} catch (err) {
-			res.status(500).json({ error: err.message });
+		} catch (_err) {
+			res.status(500).json({ error: "Internal server error" });
 		}
 	},
 );
@@ -185,8 +185,8 @@ router.post(
 				)
 				.run(password_hash, req.user.id);
 			res.json({ success: true });
-		} catch (err) {
-			res.status(500).json({ error: err.message });
+		} catch (_err) {
+			res.status(500).json({ error: "Internal server error" });
 		}
 	},
 );

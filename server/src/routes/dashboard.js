@@ -56,8 +56,8 @@ router.get("/", authMiddleware, async (_req, res) => {
 			recentTasks,
 			recentNotifications,
 		});
-	} catch (err) {
-		res.status(500).json({ error: err.message });
+	} catch (_err) {
+		res.status(500).json({ error: "Internal server error" });
 	}
 });
 

@@ -107,8 +107,8 @@ router.post("/execution-loop/run", authMiddleware, async (req, res) => {
 	try {
 		await executionLoop.tick();
 		res.json({ success: true, message: "Execution cycle completed" });
-	} catch (err) {
-		res.status(500).json({ error: err.message });
+	} catch (_err) {
+		res.status(500).json({ error: "Internal server error" });
 	}
 });
 

@@ -20,7 +20,7 @@
     "jsonwebtoken": "^9.0.2",
     "mailparser": "^3.7.1",
     "multer": "^2.1.1",
-    "nodemailer": "^6.9.8",
+    "nodemailer": "^8.0.5",
     "pg": "^8.13.1",
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
